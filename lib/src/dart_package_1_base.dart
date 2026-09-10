@@ -1,21 +1,22 @@
-// TODO: Put public facing types in this file.
+// lib/dart_package_1.dart
 
-/// Checks if you are awesome. Spoiler: you are.
-class Awesome {
-  bool get isAwesome => true;
-}
+// =====================
+// TIPO: reglas de validación
+// =====================
 
+/// Regla amarilla / general:
+/// - No permite que el número a insertar ya esté en la lista.
+/// - Además, la lista base no debe tener repetidos.
+bool ListaNumeros(List<int> numeros, int insertarnumero) {
+  // Si el número ya está, no se puede insertar.
+  if (numeros.contains(insertarnumero)) {
+    return false;
+  }
 
-bool ListaNumeros(List<int> numeros, int insertarnumero){
-
-if(numeros.contains(insertarnumero)){
-  return false;
-}
-
-  
-
+  // La lista base no debe tener repetidos.
   return numeros.length == numeros.toSet().length;
 }
+
 // Bloque Verde: Permite cualquier número y repeticiones sin restricción
 bool BloqueVerde(List<int> numeros, int insertarnumero) {
   return true;
@@ -27,11 +28,14 @@ bool BloqueAzul(List<int> numeros, int insertarnumero) {
   return numeros.every((n) => n == insertarnumero);
 }
 
-// Bloque Morado: El grupo solo puede contener un máximo de 2 números distintos
-bool BloqueMorado(List<int> numeros, int insertarnumero) {
-  final numerosUnicos = {...numeros, insertarnumero};
-  return numerosUnicos.length <= 2;
+// Bloque Rojo y Amarillo: Ningún número se puede repetir en el grupo
+bool BloqueRojo(List<int> numeros, int insertarnumero) {
+  return !numeros.contains(insertarnumero);
 }
+
+// =====================
+// ZONA: regiones y celdas
+// =====================
 
 enum Region {
   amarillo(5),
@@ -41,28 +45,25 @@ enum Region {
   rojo(1);
 
   final int capacidadMax;
-  
-  const Region(this.capacidadMax);
 
+  const Region(this.capacidadMax);
 }
 
 class Celda {
-  final int? valor; 
+  final int? valor;
   final Region region;
 
   Celda({this.valor, required this.region});
 }
 
 List<int> obtenerValoresForIn(List<Celda> tablero, Region region) {
-  List<int> resultados = []; // 1. Creas una lista vacía
+  final resultados = <int>[];
 
-  for (var celda in tablero) { // 2. Recorres cada celda del tablero
-    // 3. Revisas si cumple las dos condiciones
+  for (var celda in tablero) {
     if (celda.region == region && celda.valor != null) {
-      resultados.add(celda.valor!); // 4. Si cumple, agregas el número a tu lista
+      resultados.add(celda.valor!);
     }
   }
 
-  return resultados; 
-  
+  return resultados;
 }

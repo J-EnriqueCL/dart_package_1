@@ -1,3 +1,5 @@
+// test/dart_package_1_test.dart
+
 import 'package:dart_package_1/dart_package_1.dart';
 import 'package:test/test.dart';
 
@@ -6,7 +8,6 @@ void main() {
     test('No hay numeros en la lista', () {
       expect(ListaNumeros([], 5), isTrue);
     });
-  
 
     test('El numero 5 no esta en la lista', () {
       expect(ListaNumeros([1, 2, 3, 4], 5), isTrue);
@@ -19,63 +20,51 @@ void main() {
     test('No hay numero 5', () {
       expect(ListaNumeros([1, 2, 2, 3], 5), isFalse);
     });
-
-  
-
   });
+
   group('Testear Bloque Verde (Cualquiera)', () {
-  test('Lista vacia permite insertar cualquier numero', () {
-    expect(BloqueVerde([], 5), isTrue);
+    test('Lista vacia permite insertar cualquier numero', () {
+      expect(BloqueVerde([], 5), isTrue);
+    });
+
+    test('Permite insertar un numero repetido', () {
+      expect(BloqueVerde([3, 3, 2], 3), isTrue);
+    });
+
+    test('Permite insertar un numero diferente', () {
+      expect(BloqueVerde([1, 2, 4], 6), isTrue);
+    });
   });
 
-  test('Permite insertar un numero repetido', () {
-    expect(BloqueVerde([3, 3, 2], 3), isTrue);
+  group('Testear Bloque Azul (Todos iguales)', () {
+    test('Lista vacia permite cualquier primer numero', () {
+      expect(BloqueAzul([], 5), isTrue);
+    });
+
+    test('Permite insertar el mismo numero que ya existe', () {
+      expect(BloqueAzul([5, 5], 5), isTrue);
+    });
+
+    test('No permite insertar un numero diferente al grupo', () {
+      expect(BloqueAzul([5, 5], 3), isFalse);
+    });
+
+    test('No permite si la lista previa ya contiene valores mezclados', () {
+      expect(BloqueAzul([5, 4], 5), isFalse);
+    });
   });
 
-  test('Permite insertar un numero diferente', () {
-    expect(BloqueVerde([1, 2, 4], 6), isTrue);
-  });
-});
+  group('Testear Bloque Rojo / Amarillo (Todos diferentes)', () {
+    test('Permite insertar un numero que no esta en la lista', () {
+      expect(BloqueRojo([1, 2, 3], 4), isTrue);
+    });
 
-group('Testear Bloque Azul (Todos iguales)', () {
-  test('Lista vacia permite cualquier primer numero', () {
-    expect(BloqueAzul([], 5), isTrue);
-  });
-
-  test('Permite insertar el mismo numero que ya existe', () {
-    expect(BloqueAzul([5, 5], 5), isTrue);
+    test('No permite insertar un numero que ya existe', () {
+      expect(BloqueRojo([1, 2, 3], 2), isFalse);
+    });
   });
 
-  test('No permite insertar un numero diferente al grupo', () {
-    expect(BloqueAzul([5, 5], 3), isFalse);
-  });
-
-  test('No permite si la lista previa ya contiene valores mezclados', () {
-    expect(BloqueAzul([5, 4], 5), isFalse);
-  });
-});
-
-
-
-// Bloque Rojo y Amarillo: Ningún número se puede repetir en el grupo
-bool BloqueRojo(List<int> numeros, int insertarnumero) {
-  return !numeros.contains(insertarnumero);
-}
-
-group('Testear Bloque Rojo / Amarillo (Todos diferentes)', () {
-  test('Permite insertar un numero que no esta en la lista', () {
-    expect(BloqueRojo([1, 2, 3], 4), isTrue);
-  });
-
-  test('No permite insertar un numero que ya existe', () {
-    expect(BloqueRojo([1, 2, 3], 2), isFalse);
-  });
-});
-
-
-
-
-group('Testear obtenerValoresFoIn', () {
+  group('Testear obtenerValoresFoIn', () {
     test('Devuelve lista vacia cuando el tablero no tiene celdas', () {
       final tablero = <Celda>[];
       final resultado = obtenerValoresForIn(tablero, Region.verde);
@@ -132,6 +121,4 @@ group('Testear obtenerValoresFoIn', () {
       expect(resultado, equals([5, 5]));
     });
   });
-
 }
-

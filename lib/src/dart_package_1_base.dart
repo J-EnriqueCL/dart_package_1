@@ -1,69 +1,225 @@
-// lib/dart_package_1.dart
+// =============================
+// COLOR PROPIO PARA DART PURO
+// =============================
 
-// =====================
-// TIPO: reglas de validación
-// =====================
+class Color {
+  const Color(this.value);
 
-/// Regla amarilla / general:
-/// - No permite que el número a insertar ya esté en la lista.
-/// - Además, la lista base no debe tener repetidos.
-bool ListaNumeros(List<int> numeros, int insertarnumero) {
-  // Si el número ya está, no se puede insertar.
-  if (numeros.contains(insertarnumero)) {
-    return false;
+  final int value;
+
+  static const Color verde = Color(0xFF4CAF50);
+  static const Color morado = Color(0xFF9C27B0);
+  static const Color amarillo = Color(0xFFFFC107);
+  static const Color rojo = Color(0xFFF44336);
+  static const Color azul = Color(0xFF2196F3);
+
+  @override
+  bool operator ==(Object other) {
+    return identical(this, other) ||
+        other is Color &&
+            runtimeType == other.runtimeType &&
+            value == other.value;
   }
 
-  // La lista base no debe tener repetidos.
-  return numeros.length == numeros.toSet().length;
+  @override
+  int get hashCode => value.hashCode;
+
+  @override
+  String toString() {
+    return 'Color(0x${value.toRadixString(16).toUpperCase()})';
+  }
 }
 
-// Bloque Verde: Permite cualquier número y repeticiones sin restricción
-bool BloqueVerde(List<int> numeros, int insertarnumero) {
-  return true;
+// =============================
+// TIPO ABSTRACTO
+// =============================
+
+abstract class Tipo {
+  Color get color;
+
+  String get descripcion;
+
+  bool esPosibleAgregar(
+    List<int> actuales,
+    int posible,
+  );
+
+  /// Clave: cantidad de números que tiene la zona.
+  /// Valor: puntos que gana esa zona.
+  Map<int, int> get puntuaciones;
+
+  int calcularPuntuacion(int cantidadNumeros) {
+    return puntuaciones[cantidadNumeros] ?? 0;
+  }
 }
 
-// Bloque Azul: Todos los números de la lista y el nuevo a insertar deben ser iguales
-bool BloqueAzul(List<int> numeros, int insertarnumero) {
-  if (numeros.isEmpty) return true;
-  return numeros.every((n) => n == insertarnumero);
+// =============================
+// TIPOS DE COLORES
+// =============================
+
+class TipoVerde extends Tipo {
+  @override
+  Color get color => Color.verde;
+
+  @override
+  String get descripcion => 'Se puede colocar cualquier número';
+
+  @override
+  bool esPosibleAgregar(List<int> actuales, int posible) {
+    return true;
+  }
+
+  @override
+  Map<int, int> get puntuaciones => const {
+        1: 4,
+        2: 3,
+        3: 2,
+      };
 }
 
-// Bloque Rojo y Amarillo: Ningún número se puede repetir en el grupo
-bool BloqueRojo(List<int> numeros, int insertarnumero) {
-  return !numeros.contains(insertarnumero);
+class TipoMorado extends Tipo {
+  @override
+  Color get color => Color.morado;
+
+  @override
+  String get descripcion => 'Máximo dos números diferentes por zona';
+
+  @override
+  bool esPosibleAgregar(List<int> actuales, int posible) {
+    final distintos = actuales.toSet()..add(posible);
+
+    return distintos.length <= 2;
+  }
+
+  @override
+  Map<int, int> get puntuaciones => const {
+        1: 8,
+        2: 6,
+        3: 4,
+      };
 }
 
-// =====================
-// ZONA: regiones y celdas
-// =====================
+class TipoAmarillo extends Tipo {
+  @override
+  Color get color => Color.amarillo;
+
+  @override
+  String get descripcion => 'Todos los números deben ser distintos';
+
+  @override
+  bool esPosibleAgregar(List<int> actuales, int posible) {
+    return !actuales.contains(posible);
+  }
+
+  @override
+  Map<int, int> get puntuaciones => const {
+        1: 8,
+        2: 6,
+        3: 4,
+      };
+}
+
+class TipoRojo extends Tipo {
+  @override
+  Color get color => Color.rojo;
+
+  @override
+  String get descripcion => 'Todos los números deben ser distintos';
+
+  @override
+  bool esPosibleAgregar(List<int> actuales, int posible) {
+    return !actuales.contains(posible);
+  }
+
+  @override
+  Map<int, int> get puntuaciones => const {
+        1: 6,
+        2: 4,
+        3: 2,
+      };
+}
+
+class TipoAzul extends Tipo {
+  @override
+  Color get color => Color.azul;
+
+  @override
+  String get descripcion =>
+      'Todos los números de la zona deben ser iguales';
+
+  @override
+  bool esPosibleAgregar(List<int> actuales, int posible) {
+    return actuales.isEmpty ||
+        actuales.every((elemento) => elemento == posible);
+  }
+
+  @override
+  Map<int, int> get puntuaciones => const {
+        1: 7,
+        2: 5,
+        3: 3,
+      };
+}
+
+// =============================
+// COMPATIBILIDAD CON TUS TESTS
+// =============================
+
+bool ListaNumeros(List<int> actuales, int posible) {
+  // El número nuevo no debe estar repetido.
+  // La lista que ya existe tampoco debe tener repetidos.
+  return !actuales.contains(posible) &&
+      actuales.length == actuales.toSet().length;
+}
+
+bool BloqueVerde(List<int> actuales, int posible) {
+  return TipoVerde().esPosibleAgregar(actuales, posible);
+}
+
+bool BloqueAzul(List<int> actuales, int posible) {
+  return TipoAzul().esPosibleAgregar(actuales, posible);
+}
+
+bool BloqueRojo(List<int> actuales, int posible) {
+  return TipoRojo().esPosibleAgregar(actuales, posible);
+}
+
+// =============================
+// TABLERO Y CELDAS
+// =============================
 
 enum Region {
-  amarillo(5),
-  verde(10),
-  morado(3),
-  azul(7),
-  rojo(1);
-
-  final int capacidadMax;
-
-  const Region(this.capacidadMax);
+  verde,
+  azul,
+  amarillo,
+  rojo,
+  morado,
 }
 
 class Celda {
+  const Celda({
+    required this.region,
+    this.valor,
+  });
+
   final int? valor;
   final Region region;
-
-  Celda({this.valor, required this.region});
 }
 
-List<int> obtenerValoresForIn(List<Celda> tablero, Region region) {
-  final resultados = <int>[];
+List<int> obtenerValoresForIn(
+  List<Celda> tablero,
+  Region region,
+) {
+  return tablero
+      .where((celda) => celda.region == region && celda.valor != null)
+      .map((celda) => celda.valor!)
+      .toList();
+}
 
-  for (var celda in tablero) {
-    if (celda.region == region && celda.valor != null) {
-      resultados.add(celda.valor!);
-    }
-  }
+// =============================
+// CLASE ORIGINAL DEL TEMPLATE
+// =============================
 
-  return resultados;
+class Awesome {
+  bool get isAwesome => true;
 }

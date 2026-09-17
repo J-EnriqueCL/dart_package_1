@@ -46,7 +46,7 @@ group('Testear TipoMorado', () {
     expect(tipo.calcularPuntuacion(2), equals(6));
     expect(tipo.calcularPuntuacion(3), equals(4));
     expect(tipo.calcularPuntuacion(4), equals(0));
-  });gi
+  });
 });
 
 group('Testear TipoAmarillo', () {

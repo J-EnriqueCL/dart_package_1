@@ -1,4 +1,3 @@
-
 class Color {
   const Color(this.value);
 
@@ -27,7 +26,6 @@ class Color {
   }
 }
 
-
 abstract class Tipo {
   Color get color;
 
@@ -38,18 +36,12 @@ abstract class Tipo {
     int posible,
   );
 
-  /// Clave: cantidad de números que tiene la zona.
-  /// Valor: puntos que gana esa zona.
   Map<int, int> get puntuaciones;
 
   int calcularPuntuacion(int cantidadNumeros) {
     return puntuaciones[cantidadNumeros] ?? 0;
   }
 }
-
-// =============================
-// TIPOS DE COLORES
-// =============================
 
 class TipoVerde extends Tipo {
   @override
@@ -138,8 +130,7 @@ class TipoAzul extends Tipo {
   Color get color => Color.azul;
 
   @override
-  String get descripcion =>
-      'Todos los números de la zona deben ser iguales';
+  String get descripcion => 'Todos los números de la zona deben ser iguales';
 
   @override
   bool esPosibleAgregar(List<int> actuales, int posible) {
@@ -155,25 +146,22 @@ class TipoAzul extends Tipo {
       };
 }
 
-bool ListaNumeros(List<int> actuales, int posible) {
-  // El número nuevo no debe estar repetido.
-  // La lista que ya existe tampoco debe tener repetidos.
+bool listaNumeros(List<int> actuales, int posible) {
   return !actuales.contains(posible) &&
       actuales.length == actuales.toSet().length;
 }
 
-bool BloqueVerde(List<int> actuales, int posible) {
+bool bloqueVerde(List<int> actuales, int posible) {
   return TipoVerde().esPosibleAgregar(actuales, posible);
 }
 
-bool BloqueAzul(List<int> actuales, int posible) {
+bool bloqueAzul(List<int> actuales, int posible) {
   return TipoAzul().esPosibleAgregar(actuales, posible);
 }
 
-bool BloqueRojo(List<int> actuales, int posible) {
+bool bloqueRojo(List<int> actuales, int posible) {
   return TipoRojo().esPosibleAgregar(actuales, posible);
 }
-
 
 enum Region {
   verde,
@@ -193,43 +181,99 @@ class Celda {
   final Region region;
 }
 
-
-
 List<int> obtenerValoresForIn(
-  List<Celda> tablero,
+  List<Celda> matriz,
   Region region,
 ) {
-  return tablero
+  return matriz
       .where((celda) => celda.region == region && celda.valor != null)
       .map((celda) => celda.valor!)
       .toList();
 }
 
-
-
-
-class Awesome {
-  bool get isAwesome => true;
-}
-
 class ValoresInicialesNoProporcionadosException implements Exception {
   @override
-  String toString() =>
-      'No se puede avanzar: los valores iniciales aun no han sido proporcionados';
+  String toString() {
+    return 'No se puede avanzar: los valores iniciales aun no han sido proporcionados';
+  }
 }
+
 class ControladorPartida {
-  ControladorPartida();
-
-
   List<Celda>? _matriz;
 
   bool get tieneValoresIniciales => _matriz != null;
 
   void establecerValoresIniciales(List<Celda> valoresIniciales) {
+    if (valoresIniciales.isEmpty) {
+      throw ArgumentError('La lista de valores iniciales no puede estar vacia');
+    }
+
     _matriz = List<Celda>.from(valoresIniciales);
   }
 
   List<Celda> get matriz {
+    _verificarValoresIniciales();
+
     return List<Celda>.unmodifiable(_matriz!);
   }
+
+  List<int> valoresPorRegion(Region region) {
+    _verificarValoresIniciales();
+
+    return obtenerValoresForIn(_matriz!, region);
+  }
+
+  bool agregarNumero(Region region, int posible, Tipo tipo) {
+    _verificarValoresIniciales();
+
+    final actuales = obtenerValoresForIn(_matriz!, region);
+
+    if (!tipo.esPosibleAgregar(actuales, posible)) {
+      return false;
+    }
+
+    final indice = _matriz!.indexWhere(
+      (celda) => celda.region == region && celda.valor == null,
+    );
+
+    if (indice == -1) {
+      return false;
+    }
+
+    _matriz![indice] = Celda(
+      region: region,
+      valor: posible,
+    );
+
+    return true;
+  }
+
+  int calcularPuntuacionTotal(Map<Region, Tipo> tiposPorRegion) {
+    _verificarValoresIniciales();
+
+    var total = 0;
+
+    for (final region in Region.values) {
+      final tipo = tiposPorRegion[region];
+
+      if (tipo == null) {
+        continue;
+      }
+
+      final valores = obtenerValoresForIn(_matriz!, region);
+      total += tipo.calcularPuntuacion(valores.length);
+    }
+
+    return total;
+  }
+
+  void _verificarValoresIniciales() {
+    if (!tieneValoresIniciales) {
+      throw ValoresInicialesNoProporcionadosException();
+    }
+  }
+}
+
+class Awesome {
+  bool get isAwesome => true;
 }

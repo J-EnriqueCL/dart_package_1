@@ -1,6 +1,3 @@
-// =============================
-// COLOR PROPIO PARA DART PURO
-// =============================
 
 class Color {
   const Color(this.value);
@@ -30,9 +27,6 @@ class Color {
   }
 }
 
-// =============================
-// TIPO ABSTRACTO
-// =============================
 
 abstract class Tipo {
   Color get color;
@@ -161,10 +155,6 @@ class TipoAzul extends Tipo {
       };
 }
 
-// =============================
-// COMPATIBILIDAD CON TUS TESTS
-// =============================
-
 bool ListaNumeros(List<int> actuales, int posible) {
   // El número nuevo no debe estar repetido.
   // La lista que ya existe tampoco debe tener repetidos.
@@ -184,9 +174,6 @@ bool BloqueRojo(List<int> actuales, int posible) {
   return TipoRojo().esPosibleAgregar(actuales, posible);
 }
 
-// =============================
-// TABLERO Y CELDAS
-// =============================
 
 enum Region {
   verde,
@@ -206,6 +193,8 @@ class Celda {
   final Region region;
 }
 
+
+
 List<int> obtenerValoresForIn(
   List<Celda> tablero,
   Region region,
@@ -216,10 +205,23 @@ List<int> obtenerValoresForIn(
       .toList();
 }
 
-// =============================
-// CLASE ORIGINAL DEL TEMPLATE
-// =============================
 
 class Awesome {
   bool get isAwesome => true;
+}
+class ControladorPartida {
+  ControladorPartida();
+
+
+  List<Celda>? _matriz;
+
+  bool get tieneValoresIniciales => _matriz != null;
+
+  void establecerValoresIniciales(List<Celda> valoresIniciales) {
+    _matriz = List<Celda>.from(valoresIniciales);
+  }
+
+  List<Celda> get matriz {
+    return List<Celda>.unmodifiable(_matriz!);
+  }
 }

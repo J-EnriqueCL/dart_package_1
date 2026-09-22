@@ -206,8 +206,16 @@ List<int> obtenerValoresForIn(
 }
 
 
+
+
 class Awesome {
   bool get isAwesome => true;
+}
+
+class ValoresInicialesNoProporcionadosException implements Exception {
+  @override
+  String toString() =>
+      'No se puede avanzar: los valores iniciales aun no han sido proporcionados';
 }
 class ControladorPartida {
   ControladorPartida();

@@ -1,3 +1,0 @@
-library;
-
-export 'src/dart_package_1_base.dart';

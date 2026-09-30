@@ -146,23 +146,6 @@ class TipoAzul extends Tipo {
       };
 }
 
-bool listaNumeros(List<int> actuales, int posible) {
-  return !actuales.contains(posible) &&
-      actuales.length == actuales.toSet().length;
-}
-
-bool bloqueVerde(List<int> actuales, int posible) {
-  return TipoVerde().esPosibleAgregar(actuales, posible);
-}
-
-bool bloqueAzul(List<int> actuales, int posible) {
-  return TipoAzul().esPosibleAgregar(actuales, posible);
-}
-
-bool bloqueRojo(List<int> actuales, int posible) {
-  return TipoRojo().esPosibleAgregar(actuales, posible);
-}
-
 enum Region {
   verde,
   azul,
@@ -175,10 +158,23 @@ class Celda {
   const Celda({
     required this.region,
     this.valor,
+    this.esInicial = false,
   });
 
-  final int? valor;
   final Region region;
+  final int? valor;
+  final bool esInicial;
+
+  Celda copiarCon({
+    int? valor,
+    bool? esInicial,
+  }) {
+    return Celda(
+      region: region,
+      valor: valor,
+      esInicial: esInicial ?? this.esInicial,
+    );
+  }
 }
 
 List<int> obtenerValoresForIn(
@@ -201,20 +197,55 @@ class ValoresInicialesNoProporcionadosException implements Exception {
 class ControladorPartida {
   List<Celda>? _matriz;
 
+  final Map<Region, Tipo> _tiposPorRegion = {
+    Region.verde: TipoVerde(),
+    Region.azul: TipoAzul(),
+    Region.amarillo: TipoAmarillo(),
+    Region.rojo: TipoRojo(),
+    Region.morado: TipoMorado(),
+  };
+
   bool get tieneValoresIniciales => _matriz != null;
-
-  void establecerValoresIniciales(List<Celda> valoresIniciales) {
-    if (valoresIniciales.isEmpty) {
-      throw ArgumentError('La lista de valores iniciales no puede estar vacia');
-    }
-
-    _matriz = List<Celda>.from(valoresIniciales);
-  }
 
   List<Celda> get matriz {
     _verificarValoresIniciales();
 
     return List<Celda>.unmodifiable(_matriz!);
+  }
+
+  void establecerValoresIniciales(List<Celda> valoresIniciales) {
+    if (valoresIniciales.isEmpty) {
+      throw ArgumentError('La matriz inicial no puede estar vacia');
+    }
+
+    final valoresInicialesSeleccionados = valoresIniciales
+        .where((celda) => celda.esInicial)
+        .toList();
+
+    if (valoresInicialesSeleccionados.isEmpty) {
+      throw ArgumentError('Debe existir al menos una casilla inicial');
+    }
+
+    final valores = valoresInicialesSeleccionados
+        .where((celda) => celda.valor != null)
+        .map((celda) => celda.valor!)
+        .toList();
+
+    if (valores.length != valoresInicialesSeleccionados.length) {
+      throw ArgumentError('Todas las casillas iniciales deben tener un número');
+    }
+
+    if (valores.length != valores.toSet().length) {
+      throw ArgumentError('Los números iniciales no se pueden repetir');
+    }
+
+    if (!_cumpleReglasPorRegion(valoresIniciales)) {
+      throw ArgumentError(
+        'Los números iniciales no cumplen las reglas de las regiones',
+      );
+    }
+
+    _matriz = List<Celda>.from(valoresIniciales);
   }
 
   List<int> valoresPorRegion(Region region) {
@@ -223,17 +254,21 @@ class ControladorPartida {
     return obtenerValoresForIn(_matriz!, region);
   }
 
-  bool agregarNumero(Region region, int posible, Tipo tipo) {
+  bool agregarNumero(Region region, int posible) {
     _verificarValoresIniciales();
 
-    final actuales = obtenerValoresForIn(_matriz!, region);
+    final valoresActuales = obtenerValoresForIn(_matriz!, region);
+    final tipo = _tiposPorRegion[region]!;
 
-    if (!tipo.esPosibleAgregar(actuales, posible)) {
+    if (!tipo.esPosibleAgregar(valoresActuales, posible)) {
       return false;
     }
 
     final indice = _matriz!.indexWhere(
-      (celda) => celda.region == region && celda.valor == null,
+      (celda) =>
+          celda.region == region &&
+          celda.valor == null &&
+          !celda.esInicial,
     );
 
     if (indice == -1) {
@@ -248,23 +283,37 @@ class ControladorPartida {
     return true;
   }
 
-  int calcularPuntuacionTotal(Map<Region, Tipo> tiposPorRegion) {
+  int calcularPuntuacionTotal() {
     _verificarValoresIniciales();
 
     var total = 0;
 
     for (final region in Region.values) {
-      final tipo = tiposPorRegion[region];
-
-      if (tipo == null) {
-        continue;
-      }
-
+      final tipo = _tiposPorRegion[region]!;
       final valores = obtenerValoresForIn(_matriz!, region);
+
       total += tipo.calcularPuntuacion(valores.length);
     }
 
     return total;
+  }
+
+  bool _cumpleReglasPorRegion(List<Celda> matriz) {
+    for (final region in Region.values) {
+      final tipo = _tiposPorRegion[region]!;
+      final valores = obtenerValoresForIn(matriz, region);
+
+      for (var indice = 0; indice < valores.length; indice++) {
+        final valorActual = valores[indice];
+        final otrosValores = List<int>.from(valores)..removeAt(indice);
+
+        if (!tipo.esPosibleAgregar(otrosValores, valorActual)) {
+          return false;
+        }
+      }
+    }
+
+    return true;
   }
 
   void _verificarValoresIniciales() {
@@ -272,8 +321,4 @@ class ControladorPartida {
       throw ValoresInicialesNoProporcionadosException();
     }
   }
-}
-
-class Awesome {
-  bool get isAwesome => true;
 }

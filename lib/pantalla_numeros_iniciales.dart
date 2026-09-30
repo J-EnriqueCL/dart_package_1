@@ -88,17 +88,24 @@ class _PantallaNumerosInicialesState
   void initState() {
     super.initState();
 
-    _matriz = _distribucion
-        .map(
-          (region) => Celda(
-            region: region,
-            esInicial: true,
-          ),
-        )
-        .toList();
+    const indicesIniciales = {2, 12, 22, 32, 42};
+
+    _matriz = _distribucion.asMap().entries.map((entrada) {
+      return Celda(
+        region: entrada.value,
+        esInicial: indicesIniciales.contains(entrada.key),
+      );
+    }).toList();
   }
 
   void _seleccionarCelda(int indice) {
+    if (!_matriz[indice].esInicial) {
+      setState(() {
+        _mensajeError = 'Solo puedes seleccionar una casilla inicial.';
+      });
+      return;
+    }
+
     setState(() {
       _indiceSeleccionado = indice;
       _mensajeError = null;
@@ -106,9 +113,17 @@ class _PantallaNumerosInicialesState
   }
 
   void _colocarNumero(int numero) {
+    if (numero < 1 || numero > 6) {
+      setState(() {
+        _mensajeError = 'Solo se permiten números del 1 al 6.';
+      });
+      return;
+    }
+
     if (_indiceSeleccionado == null) {
       setState(() {
-        _mensajeError = 'Selecciona una casilla antes de colocar un número.';
+        _mensajeError =
+            'Selecciona una casilla inicial antes de colocar un número.';
       });
       return;
     }
@@ -160,7 +175,7 @@ class _PantallaNumerosInicialesState
   void _borrarNumero() {
     if (_indiceSeleccionado == null) {
       setState(() {
-        _mensajeError = 'Selecciona una casilla antes de borrar.';
+        _mensajeError = 'Selecciona una casilla inicial antes de borrar.';
       });
       return;
     }
@@ -255,6 +270,15 @@ class _PantallaNumerosInicialesState
     return material.Colors.white;
   }
 
+  String _descripcionDeRegionSeleccionada() {
+    if (_indiceSeleccionado == null) {
+      return '';
+    }
+
+    final region = _matriz[_indiceSeleccionado!].region;
+    return _tiposPorRegion[region]!.descripcion;
+  }
+
   @override
   material.Widget build(material.BuildContext context) {
     return material.Scaffold(
@@ -273,6 +297,11 @@ class _PantallaNumerosInicialesState
                   fontSize: 20,
                   fontWeight: material.FontWeight.bold,
                 ),
+              ),
+              const material.SizedBox(height: 8),
+              const material.Text(
+                'Selecciona una casilla marcada y coloca un número del 1 al 6.',
+                textAlign: material.TextAlign.center,
               ),
               const material.SizedBox(height: 8),
               const material.Text(
@@ -306,7 +335,9 @@ class _PantallaNumerosInicialesState
                               border: material.Border.all(
                                 color: seleccionada
                                     ? material.Colors.black
-                                    : material.Colors.white,
+                                    : celda.esInicial
+                                        ? material.Colors.white
+                                        : material.Colors.grey.shade700,
                                 width: seleccionada ? 4 : 1,
                               ),
                             ),
@@ -328,10 +359,7 @@ class _PantallaNumerosInicialesState
               const material.SizedBox(height: 12),
               if (_indiceSeleccionado != null)
                 material.Text(
-                  _tiposPorRegion[
-                    _matriz[_indiceSeleccionado!].region,
-                  ]!
-                      .descripcion,
+                  _descripcionDeRegionSeleccionada(),
                   textAlign: material.TextAlign.center,
                 ),
               if (_mensajeError != null) ...[
@@ -351,7 +379,7 @@ class _PantallaNumerosInicialesState
                 spacing: 8,
                 runSpacing: 8,
                 children: [
-                  for (var numero = 1; numero <= 9; numero++)
+                  for (var numero = 1; numero <= 6; numero++)
                     material.ElevatedButton(
                       onPressed: () => _colocarNumero(numero),
                       child: material.Text('$numero'),

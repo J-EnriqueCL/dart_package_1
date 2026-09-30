@@ -11,7 +11,7 @@ void main() {
 
     test('Permite cualquier número, aun si está repetido', () {
       expect(tipo.esPosibleAgregar([1, 1, 2], 1), isTrue);
-      expect(tipo.esPosibleAgregar([1, 2, 3], 9), isTrue);
+      expect(tipo.esPosibleAgregar([1, 2, 3], 6), isTrue);
     });
 
     test('Calcula la puntuación verde', () {

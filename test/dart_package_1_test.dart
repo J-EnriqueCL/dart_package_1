@@ -128,15 +128,35 @@ void main() {
     late ControladorPartida controlador;
 
     final matrizInicial = [
-      const Celda(region: Region.verde, valor: 2),
+      const Celda(
+        region: Region.verde,
+        valor: 2,
+        esInicial: true,
+      ),
       const Celda(region: Region.verde),
-      const Celda(region: Region.azul, valor: 4),
+      const Celda(
+        region: Region.azul,
+        valor: 4,
+        esInicial: true,
+      ),
       const Celda(region: Region.azul),
-      const Celda(region: Region.rojo, valor: 3),
+      const Celda(
+        region: Region.rojo,
+        valor: 3,
+        esInicial: true,
+      ),
       const Celda(region: Region.rojo),
-      const Celda(region: Region.morado, valor: 6),
+      const Celda(
+        region: Region.morado,
+        valor: 6,
+        esInicial: true,
+      ),
       const Celda(region: Region.morado),
-      const Celda(region: Region.amarillo, valor: 1),
+      const Celda(
+        region: Region.amarillo,
+        valor: 1,
+        esInicial: true,
+      ),
       const Celda(region: Region.amarillo),
     ];
 
@@ -160,7 +180,6 @@ void main() {
         () => controlador.agregarNumero(
           Region.verde,
           5,
-          TipoVerde(),
         ),
         throwsA(isA<ValoresInicialesNoProporcionadosException>()),
       );
@@ -168,13 +187,7 @@ void main() {
 
     test('No permite calcular puntuación sin valores iniciales', () {
       expect(
-        () => controlador.calcularPuntuacionTotal({
-          Region.verde: TipoVerde(),
-          Region.azul: TipoAzul(),
-          Region.amarillo: TipoAmarillo(),
-          Region.rojo: TipoRojo(),
-          Region.morado: TipoMorado(),
-        }),
+        () => controlador.calcularPuntuacionTotal(),
         throwsA(isA<ValoresInicialesNoProporcionadosException>()),
       );
     });
@@ -186,7 +199,46 @@ void main() {
       );
     });
 
-    test('Se desbloquea después de proporcionar valores iniciales', () {
+    test('No acepta una matriz sin casillas iniciales', () {
+      expect(
+        () => controlador.establecerValoresIniciales([
+          const Celda(region: Region.verde),
+        ]),
+        throwsArgumentError,
+      );
+    });
+
+    test('No acepta casillas iniciales sin número', () {
+      expect(
+        () => controlador.establecerValoresIniciales([
+          const Celda(
+            region: Region.verde,
+            esInicial: true,
+          ),
+        ]),
+        throwsArgumentError,
+      );
+    });
+
+    test('No acepta números iniciales repetidos', () {
+      expect(
+        () => controlador.establecerValoresIniciales([
+          const Celda(
+            region: Region.verde,
+            valor: 2,
+            esInicial: true,
+          ),
+          const Celda(
+            region: Region.rojo,
+            valor: 2,
+            esInicial: true,
+          ),
+        ]),
+        throwsArgumentError,
+      );
+    });
+
+    test('Se desbloquea después de proporcionar valores iniciales válidos', () {
       controlador.establecerValoresIniciales(matrizInicial);
 
       expect(controlador.tieneValoresIniciales, isTrue);
@@ -213,7 +265,6 @@ void main() {
       final agregado = controlador.agregarNumero(
         Region.azul,
         4,
-        TipoAzul(),
       );
 
       expect(agregado, isTrue);
@@ -229,7 +280,6 @@ void main() {
       final agregado = controlador.agregarNumero(
         Region.azul,
         2,
-        TipoAzul(),
       );
 
       expect(agregado, isFalse);
@@ -239,15 +289,18 @@ void main() {
       );
     });
 
-    test('No agrega números si una región ya no tiene celdas vacías', () {
+    test('No agrega números si la región ya no tiene celdas vacías', () {
       controlador.establecerValoresIniciales([
-        const Celda(region: Region.verde, valor: 2),
+        const Celda(
+          region: Region.verde,
+          valor: 2,
+          esInicial: true,
+        ),
       ]);
 
       final agregado = controlador.agregarNumero(
         Region.verde,
         8,
-        TipoVerde(),
       );
 
       expect(agregado, isFalse);
@@ -259,22 +312,42 @@ void main() {
 
     test('Calcula la puntuación total de la matriz', () {
       controlador.establecerValoresIniciales([
-        const Celda(region: Region.verde, valor: 2),
-        const Celda(region: Region.verde, valor: 5),
-        const Celda(region: Region.azul, valor: 4),
-        const Celda(region: Region.azul, valor: 4),
-        const Celda(region: Region.rojo, valor: 3),
-        const Celda(region: Region.morado, valor: 6),
-        const Celda(region: Region.amarillo, valor: 1),
+        const Celda(
+          region: Region.verde,
+          valor: 2,
+          esInicial: true,
+        ),
+        const Celda(
+          region: Region.verde,
+          valor: 5,
+        ),
+        const Celda(
+          region: Region.azul,
+          valor: 4,
+          esInicial: true,
+        ),
+        const Celda(
+          region: Region.azul,
+          valor: 4,
+        ),
+        const Celda(
+          region: Region.rojo,
+          valor: 3,
+          esInicial: true,
+        ),
+        const Celda(
+          region: Region.morado,
+          valor: 6,
+          esInicial: true,
+        ),
+        const Celda(
+          region: Region.amarillo,
+          valor: 1,
+          esInicial: true,
+        ),
       ]);
 
-      final puntuacion = controlador.calcularPuntuacionTotal({
-        Region.verde: TipoVerde(),
-        Region.azul: TipoAzul(),
-        Region.amarillo: TipoAmarillo(),
-        Region.rojo: TipoRojo(),
-        Region.morado: TipoMorado(),
-      });
+      final puntuacion = controlador.calcularPuntuacionTotal();
 
       expect(puntuacion, equals(30));
     });

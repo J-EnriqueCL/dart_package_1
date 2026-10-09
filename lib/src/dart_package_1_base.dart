@@ -1,151 +1,3 @@
-class Color {
-  const Color(this.value);
-
-  final int value;
-
-  static const Color verde = Color(0xFF4CAF50);
-  static const Color morado = Color(0xFF9C27B0);
-  static const Color amarillo = Color(0xFFFFC107);
-  static const Color rojo = Color(0xFFF44336);
-  static const Color azul = Color(0xFF2196F3);
-
-  @override
-  bool operator ==(Object other) {
-    return identical(this, other) ||
-        other is Color &&
-            runtimeType == other.runtimeType &&
-            value == other.value;
-  }             
-
-  @override
-  int get hashCode => value.hashCode;
-
-  @override
-  String toString() {
-    return 'Color(0x${value.toRadixString(16).toUpperCase()})';
-  }
-}
-
-abstract class Tipo {
-  Color get color;
-
-  String get descripcion;
-
-  bool esPosibleAgregar(
-    List<int> actuales,
-    int posible,
-  );
-
-  Map<int, int> get puntuaciones;
-
-  int calcularPuntuacion(int cantidadNumeros) {
-    return puntuaciones[cantidadNumeros] ?? 0;
-  }
-}
-
-class TipoVerde extends Tipo {
-  @override
-  Color get color => Color.verde;
-
-  @override
-  String get descripcion => 'Se puede colocar cualquier número';
-
-  @override
-  bool esPosibleAgregar(List<int> actuales, int posible) {
-    return true;
-  }
-
-  @override
-  Map<int, int> get puntuaciones => const {
-        1: 4,
-        2: 3,
-        3: 2,
-      };
-}
-
-class TipoMorado extends Tipo {
-  @override
-  Color get color => Color.morado;
-
-  @override
-  String get descripcion => 'Máximo dos números diferentes por zona';
-
-  @override
-  bool esPosibleAgregar(List<int> actuales, int posible) {
-    final distintos = actuales.toSet()..add(posible);
-
-    return distintos.length <= 2;
-  }
-
-  @override
-  Map<int, int> get puntuaciones => const {
-        1: 8,
-        2: 6,
-        3: 4,
-      };
-}
-
-class TipoAmarillo extends Tipo {
-  @override
-  Color get color => Color.amarillo;
-
-  @override
-  String get descripcion => 'Todos los números deben ser distintos';
-
-  @override
-  bool esPosibleAgregar(List<int> actuales, int posible) {
-    return !actuales.contains(posible);
-  }
-
-  @override
-  Map<int, int> get puntuaciones => const {
-        1: 8,
-        2: 6,
-        3: 4,
-      };
-}
-
-class TipoRojo extends Tipo {
-  @override
-  Color get color => Color.rojo;
-
-  @override
-  String get descripcion => 'Todos los números deben ser distintos';
-
-  @override
-  bool esPosibleAgregar(List<int> actuales, int posible) {
-    return !actuales.contains(posible);
-  }
-
-  @override
-  Map<int, int> get puntuaciones => const {
-        1: 6,
-        2: 4,
-        3: 2,
-      };
-}
-
-class TipoAzul extends Tipo {
-  @override
-  Color get color => Color.azul;
-
-  @override
-  String get descripcion => 'Todos los números de la zona deben ser iguales';
-
-  @override
-  bool esPosibleAgregar(List<int> actuales, int posible) {
-    return actuales.isEmpty ||
-        actuales.every((elemento) => elemento == posible);
-  }
-
-  @override
-  Map<int, int> get puntuaciones => const {
-        1: 7,
-        2: 5,
-        3: 3,
-      };
-}
-
 enum Region {
   verde,
   azul,
@@ -154,29 +6,189 @@ enum Region {
   morado,
 }
 
+abstract class Tipo {
+  const Tipo();
+
+  String get descripcion;
+
+  bool esPosibleAgregar(
+    List<int> valoresActuales,
+    int nuevoValor,
+  );
+
+  int calcularPuntuacion(
+    List<int> valores,
+  );
+}
+
+class TipoVerde extends Tipo {
+  const TipoVerde();
+
+  @override
+  String get descripcion {
+    return 'Zona verde: los números no se pueden repetir.';
+  }
+
+  @override
+  bool esPosibleAgregar(
+    List<int> valoresActuales,
+    int nuevoValor,
+  ) {
+    return !valoresActuales.contains(nuevoValor);
+  }
+
+  @override
+  int calcularPuntuacion(
+    List<int> valores,
+  ) {
+    return valores.length;
+  }
+}
+
+class TipoAzul extends Tipo {
+  const TipoAzul();
+
+  @override
+  String get descripcion {
+    return 'Zona azul: todos los números deben ser iguales.';
+  }
+
+  @override
+  bool esPosibleAgregar(
+    List<int> valoresActuales,
+    int nuevoValor,
+  ) {
+    if (valoresActuales.isEmpty) {
+      return true;
+    }
+
+    return valoresActuales.every(
+      (valor) => valor == nuevoValor,
+    );
+  }
+
+  @override
+  int calcularPuntuacion(
+    List<int> valores,
+  ) {
+    if (valores.isEmpty) {
+      return 0;
+    }
+
+    return valores.length * valores.first;
+  }
+}
+
+class TipoAmarillo extends Tipo {
+  const TipoAmarillo();
+
+  @override
+  String get descripcion {
+    return 'Zona amarilla: los números no se pueden repetir.';
+  }
+
+  @override
+  bool esPosibleAgregar(
+    List<int> valoresActuales,
+    int nuevoValor,
+  ) {
+    return !valoresActuales.contains(nuevoValor);
+  }
+
+  @override
+  int calcularPuntuacion(
+    List<int> valores,
+  ) {
+    return valores.fold(
+      0,
+      (total, valor) => total + valor,
+    );
+  }
+}
+
+class TipoRojo extends Tipo {
+  const TipoRojo();
+
+  @override
+  String get descripcion {
+    return 'Zona roja: los números no se pueden repetir.';
+  }
+
+  @override
+  bool esPosibleAgregar(
+    List<int> valoresActuales,
+    int nuevoValor,
+  ) {
+    return !valoresActuales.contains(nuevoValor);
+  }
+
+  @override
+  int calcularPuntuacion(
+    List<int> valores,
+  ) {
+    return valores.fold(
+      0,
+      (total, valor) => total + valor,
+    );
+  }
+}
+
+class TipoMorado extends Tipo {
+  const TipoMorado();
+
+  @override
+  String get descripcion {
+    return 'Zona morada: puede contener como máximo dos números distintos.';
+  }
+
+  @override
+  bool esPosibleAgregar(
+    List<int> valoresActuales,
+    int nuevoValor,
+  ) {
+    final valoresDistintos = valoresActuales.toSet();
+
+    valoresDistintos.add(nuevoValor);
+
+    return valoresDistintos.length <= 2;
+  }
+
+  @override
+  int calcularPuntuacion(
+    List<int> valores,
+  ) {
+    return valores.fold(
+      0,
+      (total, valor) => total + valor,
+    );
+  }
+}
+
 class Celda {
   const Celda({
     required this.region,
     this.valor,
-    this.esInicial = false,
     this.esJugable = true,
+    this.esInicial = false,
   });
 
   final Region region;
   final int? valor;
-  final bool esInicial;
   final bool esJugable;
+  final bool esInicial;
 
   Celda copiarCon({
+    Region? region,
     int? valor,
-    bool? esInicial,
+    bool borrarValor = false,
     bool? esJugable,
+    bool? esInicial,
   }) {
     return Celda(
-      region: region,
-      valor: valor,
-      esInicial: esInicial ?? this.esInicial,
+      region: region ?? this.region,
+      valor: borrarValor ? null : valor ?? this.valor,
       esJugable: esJugable ?? this.esJugable,
+      esInicial: esInicial ?? this.esInicial,
     );
   }
 }
@@ -188,7 +200,6 @@ List<int> obtenerValoresForIn(
   return matriz
       .where(
         (celda) =>
-            celda.esJugable &&
             celda.region == region &&
             celda.valor != null,
       )
@@ -196,147 +207,151 @@ List<int> obtenerValoresForIn(
       .toList();
 }
 
-class ValoresInicialesNoProporcionadosException implements Exception {
-  @override
-  String toString() {
-    return 'No se puede avanzar: los valores iniciales aun no han sido proporcionados';
-  }
-}
-
 class ControladorPartida {
   List<Celda>? _matriz;
 
   final Map<Region, Tipo> _tiposPorRegion = {
-    Region.verde: TipoVerde(),
-    Region.azul: TipoAzul(),
-    Region.amarillo: TipoAmarillo(),
-    Region.rojo: TipoRojo(),
-    Region.morado: TipoMorado(),
+    Region.verde: const TipoVerde(),
+    Region.azul: const TipoAzul(),
+    Region.amarillo: const TipoAmarillo(),
+    Region.rojo: const TipoRojo(),
+    Region.morado: const TipoMorado(),
   };
 
-  bool get tieneValoresIniciales => _matriz != null;
-
   List<Celda> get matriz {
-    _verificarValoresIniciales();
+    _verificarTableroInicializado();
 
     return List<Celda>.unmodifiable(_matriz!);
   }
 
-  void establecerValoresIniciales(List<Celda> valoresIniciales) {
-    if (valoresIniciales.isEmpty) {
-      throw ArgumentError('La matriz inicial no puede estar vacia');
+  void establecerValoresIniciales(
+    List<Celda> matriz,
+  ) {
+    if (matriz.length != 49) {
+      throw ArgumentError(
+        'El tablero debe tener exactamente 49 celdas.',
+      );
     }
 
-    final valoresInicialesSeleccionados = valoresIniciales
+    final casillasIniciales = matriz
         .where((celda) => celda.esInicial)
         .toList();
 
-    if (valoresInicialesSeleccionados.isEmpty) {
-      throw ArgumentError('Debe existir al menos una casilla inicial');
-    }
+    final valoresIniciales = casillasIniciales
+        .map((celda) => celda.valor)
+        .whereType<int>()
+        .toSet();
 
-    final valores = valoresInicialesSeleccionados
-        .where((celda) => celda.valor != null)
-        .map((celda) => celda.valor!)
-        .toList();
-
-    if (valores.length != valoresInicialesSeleccionados.length) {
+    if (casillasIniciales.length != 6) {
       throw ArgumentError(
-        'Todas las casillas iniciales deben tener un número',
+        'Debe haber exactamente 6 casillas iniciales.',
       );
     }
 
-    if (valores.length != valores.toSet().length) {
-      throw ArgumentError('Los números iniciales no se pueden repetir');
-    }
+    const numerosRequeridos = <int>{
+      1,
+      2,
+      3,
+      4,
+      5,
+      6,
+    };
 
-    if (!_cumpleReglasPorRegion(valoresIniciales)) {
+    if (valoresIniciales.length != 6 ||
+        !valoresIniciales.containsAll(numerosRequeridos)) {
       throw ArgumentError(
-        'Los números iniciales no cumplen las reglas de las regiones',
+        'Las casillas iniciales deben contener los números del 1 al 6 sin repetir.',
       );
     }
 
-    _matriz = List<Celda>.from(valoresIniciales);
+    // IMPORTANTE:
+    // En la configuración inicial NO se validan las reglas
+    // de las regiones de colores. Solo se guardan los seis
+    // números iniciales para comenzar la partida.
+    _matriz = List<Celda>.from(matriz);
   }
 
-  List<int> valoresPorRegion(Region region) {
-    _verificarValoresIniciales();
+  bool agregarNumeroEnCelda(
+    int indice,
+    int numero,
+  ) {
+    _verificarTableroInicializado();
 
-    return obtenerValoresForIn(_matriz!, region);
-  }
-
- bool agregarNumeroEnCelda(int indice, int posible) {
-  _verificarValoresIniciales();
-
-  if (indice < 0 || indice >= _matriz!.length) {
-    return false;
-  }
-
-  if (posible < 1 || posible > 6) {
-    return false;
-  }
-
-  final celda = _matriz![indice];
-
-  if (!celda.esJugable || celda.esInicial || celda.valor != null) {
-    return false;
-  }
-
-  final tipo = _tiposPorRegion[celda.region]!;
-  final valoresActuales = obtenerValoresForIn(
-    _matriz!,
-    celda.region,
-  );
-
-  if (!tipo.esPosibleAgregar(valoresActuales, posible)) {
-    return false;
-  }
-
-  _matriz![indice] = Celda(
-    region: celda.region,
-    valor: posible,
-    esJugable: celda.esJugable,
-  );
-
-  return true;
-}
-
-  int calcularPuntuacionTotal() {
-    _verificarValoresIniciales();
-
-    var total = 0;
-
-    for (final region in Region.values) {
-      final tipo = _tiposPorRegion[region]!;
-      final valores = obtenerValoresForIn(_matriz!, region);
-
-      total += tipo.calcularPuntuacion(valores.length);
+    if (indice < 0 || indice >= _matriz!.length) {
+      return false;
     }
 
-    return total;
-  }
-
-  bool _cumpleReglasPorRegion(List<Celda> matriz) {
-    for (final region in Region.values) {
-      final tipo = _tiposPorRegion[region]!;
-      final valores = obtenerValoresForIn(matriz, region);
-
-      for (var indice = 0; indice < valores.length; indice++) {
-        final valorActual = valores[indice];
-        final otrosValores = List<int>.from(valores)..removeAt(indice);
-
-        if (!tipo.esPosibleAgregar(otrosValores, valorActual)) {
-          return false;
-        }
-      }
+    if (numero < 1 || numero > 6) {
+      return false;
     }
+
+    final celdaDestino = _matriz![indice];
+
+    if (!celdaDestino.esJugable) {
+      return false;
+    }
+
+    if (celdaDestino.esInicial) {
+      return false;
+    }
+
+    if (celdaDestino.valor != null) {
+      return false;
+    }
+
+    final tipoRegionDestino =
+        _tiposPorRegion[celdaDestino.region]!;
+
+    final valoresActualesRegion = obtenerValoresForIn(
+      _matriz!,
+      celdaDestino.region,
+    );
+
+    final esValido = tipoRegionDestino.esPosibleAgregar(
+      valoresActualesRegion,
+      numero,
+    );
+
+    if (!esValido) {
+      return false;
+    }
+
+    _matriz![indice] = Celda(
+      region: celdaDestino.region,
+      valor: numero,
+      esJugable: celdaDestino.esJugable,
+      esInicial: celdaDestino.esInicial,
+    );
 
     return true;
   }
 
-  void _verificarValoresIniciales() {
-    if (!tieneValoresIniciales) {
-      throw ValoresInicialesNoProporcionadosException();
+  int calcularPuntuacionTotal() {
+    _verificarTableroInicializado();
+
+    var puntuacionTotal = 0;
+
+    for (final region in Region.values) {
+      final tipo = _tiposPorRegion[region]!;
+
+      final valoresRegion = obtenerValoresForIn(
+        _matriz!,
+        region,
+      );
+
+      puntuacionTotal += tipo.calcularPuntuacion(
+        valoresRegion,
+      );
+    }
+
+    return puntuacionTotal;
+  }
+
+  void _verificarTableroInicializado() {
+    if (_matriz == null) {
+      throw StateError(
+        'Primero debes establecer los valores iniciales.',
+      );
     }
   }
 }

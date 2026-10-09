@@ -20,14 +20,6 @@ class _PantallaNumerosInicialesState
     extends material.State<PantallaNumerosIniciales> {
   static const int columnas = 7;
 
-  final Map<Region, Tipo> _tiposPorRegion = {
-    Region.verde: TipoVerde(),
-    Region.azul: TipoAzul(),
-    Region.amarillo: TipoAmarillo(),
-    Region.rojo: TipoRojo(),
-    Region.morado: TipoMorado(),
-  };
-
   final List<Region> _distribucion = [
     Region.amarillo,
     Region.verde,
@@ -81,6 +73,7 @@ class _PantallaNumerosInicialesState
   ];
 
   late List<Celda> _matriz;
+
   int? _indiceSeleccionado;
   String? _mensajeError;
 
@@ -88,14 +81,15 @@ class _PantallaNumerosInicialesState
   void initState() {
     super.initState();
 
-   const indicesIniciales = {
-  2,
-  12,
-  22,
-  32,
-  34,
-  42,
-};
+    const indicesIniciales = <int>{
+      2,
+      12,
+      22,
+      32,
+      34,
+      42,
+    };
+
     _matriz = _distribucion.asMap().entries.map((entrada) {
       return Celda(
         region: entrada.value,
@@ -105,9 +99,12 @@ class _PantallaNumerosInicialesState
   }
 
   void _seleccionarCelda(int indice) {
-    if (!_matriz[indice].esInicial) {
+    final celda = _matriz[indice];
+
+    if (!celda.esInicial) {
       setState(() {
-        _mensajeError = 'Solo puedes seleccionar una de las 6 casillas iniciales.';
+        _mensajeError =
+            'Solo puedes seleccionar una de las 6 casillas iniciales.';
       });
       return;
     }
@@ -119,62 +116,48 @@ class _PantallaNumerosInicialesState
   }
 
   void _colocarNumero(int numero) {
-    if (numero < 1 || numero > 6) {
-      setState(() {
-        _mensajeError = 'Solo se permiten números del 1 al 6.';
-      });
-      return;
-    }
-
     if (_indiceSeleccionado == null) {
       setState(() {
         _mensajeError =
-            'Selecciona una de las 6 casillas iniciales antes de colocar un número.';
+            'Selecciona una de las 6 casillas iniciales primero.';
       });
       return;
     }
 
-    final repetido = _matriz.asMap().entries.any(
-      (entrada) =>
-          entrada.key != _indiceSeleccionado &&
-          entrada.value.esInicial &&
-          entrada.value.valor == numero,
+    final indice = _indiceSeleccionado!;
+    final celdaAnterior = _matriz[indice];
+
+    if (!celdaAnterior.esInicial) {
+      setState(() {
+        _mensajeError =
+            'La casilla seleccionada no pertenece a las casillas iniciales.';
+      });
+      return;
+    }
+
+    final numeroYaEstaUsado = _matriz.asMap().entries.any(
+      (entrada) {
+        return entrada.key != indice &&
+            entrada.value.esInicial &&
+            entrada.value.valor == numero;
+      },
     );
 
-    if (repetido) {
+    if (numeroYaEstaUsado) {
       setState(() {
         _mensajeError = 'El número $numero ya fue seleccionado.';
       });
       return;
     }
 
-    final celdaActual = _matriz[_indiceSeleccionado!];
-
-    final valoresRegion = obtenerValoresForIn(
-      _matriz,
-      celdaActual.region,
-    );
-
-    final valoresSinCeldaActual = List<int>.from(valoresRegion);
-
-    if (celdaActual.valor != null) {
-      valoresSinCeldaActual.remove(celdaActual.valor);
-    }
-
-    final tipo = _tiposPorRegion[celdaActual.region]!;
-
-    if (!tipo.esPosibleAgregar(valoresSinCeldaActual, numero)) {
-      setState(() {
-        _mensajeError =
-            'El número $numero no cumple la regla de esta región.';
-      });
-      return;
-    }
-
     setState(() {
-      _matriz[_indiceSeleccionado!] = celdaActual.copiarCon(
+      _matriz[indice] = Celda(
+        region: celdaAnterior.region,
         valor: numero,
+        esJugable: celdaAnterior.esJugable,
+        esInicial: true,
       );
+
       _mensajeError = null;
     });
   }
@@ -183,94 +166,86 @@ class _PantallaNumerosInicialesState
     if (_indiceSeleccionado == null) {
       setState(() {
         _mensajeError =
-            'Selecciona una de las 6 casillas iniciales antes de borrar.';
+            'Selecciona una de las 6 casillas iniciales primero.';
       });
       return;
     }
 
-    final celdaActual = _matriz[_indiceSeleccionado!];
+    final indice = _indiceSeleccionado!;
+    final celdaAnterior = _matriz[indice];
 
-    if (celdaActual.valor == null) {
+    if (!celdaAnterior.esInicial) {
       setState(() {
-        _mensajeError = 'La casilla seleccionada está vacía.';
+        _mensajeError =
+            'La casilla seleccionada no pertenece a las casillas iniciales.';
+      });
+      return;
+    }
+
+    if (celdaAnterior.valor == null) {
+      setState(() {
+        _mensajeError = 'La casilla seleccionada ya está vacía.';
       });
       return;
     }
 
     setState(() {
-      _matriz[_indiceSeleccionado!] = celdaActual.copiarCon(
+      _matriz[indice] = Celda(
+        region: celdaAnterior.region,
         valor: null,
+        esJugable: celdaAnterior.esJugable,
+        esInicial: true,
       );
+
       _mensajeError = null;
     });
   }
 
-  bool get _todasLasCasillasInicialesTienenNumero {
-    final valores = _matriz
-        .where((celda) => celda.esInicial && celda.valor != null)
-        .map((celda) => celda.valor!)
+  List<Celda> get _casillasIniciales {
+    return _matriz.where((celda) => celda.esInicial).toList();
+  }
+
+  Set<int> get _valoresIniciales {
+    return _casillasIniciales
+        .map((celda) => celda.valor)
+        .whereType<int>()
         .toSet();
-
-    return valores.length == 6 &&
-        valores.containsAll({
-          1,
-          2,
-          3,
-          4,
-          5,
-          6,
-        });
-  }
-
-  bool get _noHayNumerosInicialesRepetidos {
-    final valores = _matriz
-        .where((celda) => celda.esInicial && celda.valor != null)
-        .map((celda) => celda.valor!)
-        .toList();
-
-    return valores.length == valores.toSet().length;
-  }
-
-  bool get _reglasDeRegionesValidas {
-    for (final region in Region.values) {
-      final tipo = _tiposPorRegion[region]!;
-      final valores = obtenerValoresForIn(_matriz, region);
-
-      for (var indice = 0; indice < valores.length; indice++) {
-        final valorActual = valores[indice];
-        final otrosValores = List<int>.from(valores)..removeAt(indice);
-
-        if (!tipo.esPosibleAgregar(otrosValores, valorActual)) {
-          return false;
-        }
-      }
-    }
-
-    return true;
   }
 
   bool get _puedeIniciar {
-    return _todasLasCasillasInicialesTienenNumero &&
-        _noHayNumerosInicialesRepetidos &&
-        _reglasDeRegionesValidas;
+    const numerosObligatorios = <int>{
+      1,
+      2,
+      3,
+      4,
+      5,
+      6,
+    };
+
+    return _casillasIniciales.length == 6 &&
+        _valoresIniciales.length == 6 &&
+        _valoresIniciales.containsAll(numerosObligatorios);
   }
 
   void _iniciarPartida() {
     if (!_puedeIniciar) {
       setState(() {
         _mensajeError =
-            'Coloca los números del 1 al 6, sin repetir y respetando las reglas.';
+            'Debes colocar los números del 1 al 6 sin repetir.';
       });
       return;
     }
 
     final controlador = ControladorPartida();
-    controlador.establecerValoresIniciales(_matriz);
+
+    controlador.establecerValoresIniciales(
+      List<Celda>.from(_matriz),
+    );
 
     widget.alIniciar(controlador);
   }
 
-  material.Color _colorVisual(Region region) {
+  material.Color _colorDeRegion(Region region) {
     switch (region) {
       case Region.verde:
         return material.Colors.green;
@@ -286,21 +261,9 @@ class _PantallaNumerosInicialesState
   }
 
   material.Color _colorTexto(Region region) {
-    if (region == Region.amarillo) {
-      return material.Colors.black;
-    }
-
-    return material.Colors.white;
-  }
-
-  String _descripcionDeRegionSeleccionada() {
-    if (_indiceSeleccionado == null) {
-      return '';
-    }
-
-    final region = _matriz[_indiceSeleccionado!].region;
-
-    return _tiposPorRegion[region]!.descripcion;
+    return region == Region.amarillo
+        ? material.Colors.black
+        : material.Colors.white;
   }
 
   @override
@@ -327,9 +290,9 @@ class _PantallaNumerosInicialesState
                 'Selecciona las 6 casillas marcadas y coloca los números del 1 al 6 sin repetir.',
                 textAlign: material.TextAlign.center,
               ),
-              const material.SizedBox(height: 8),
+              const material.SizedBox(height: 6),
               const material.Text(
-                'Cada número inicial debe respetar la regla de su región.',
+                'Las reglas de color se aplicarán después de presionar Inicio.',
                 textAlign: material.TextAlign.center,
               ),
               const material.SizedBox(height: 16),
@@ -347,7 +310,7 @@ class _PantallaNumerosInicialesState
                       ),
                       itemBuilder: (context, indice) {
                         final celda = _matriz[indice];
-                        final seleccionada =
+                        final estaSeleccionada =
                             indice == _indiceSeleccionado;
 
                         return material.InkWell(
@@ -355,15 +318,29 @@ class _PantallaNumerosInicialesState
                           child: material.Container(
                             alignment: material.Alignment.center,
                             decoration: material.BoxDecoration(
-                              color: _colorVisual(celda.region),
+                              color: _colorDeRegion(celda.region),
                               border: material.Border.all(
-                                color: seleccionada
+                                color: estaSeleccionada
                                     ? material.Colors.black
                                     : celda.esInicial
                                         ? material.Colors.white
-                                        : material.Colors.grey.shade700,
-                                width: seleccionada ? 4 : 1,
+                                        : material.Colors.black38,
+                                width: estaSeleccionada
+                                    ? 5
+                                    : celda.esInicial
+                                        ? 3
+                                        : 1,
                               ),
+                              boxShadow: celda.esInicial
+                                  ? [
+                                      material.BoxShadow(
+                                        color: material.Colors.white
+                                            .withValues(alpha: 0.65),
+                                        blurRadius: 4,
+                                        spreadRadius: 1,
+                                      ),
+                                    ]
+                                  : null,
                             ),
                             child: material.Text(
                               celda.valor?.toString() ?? '',
@@ -380,12 +357,18 @@ class _PantallaNumerosInicialesState
                   ),
                 ),
               ),
-              const material.SizedBox(height: 12),
-              if (_indiceSeleccionado != null)
-                material.Text(
-                  _descripcionDeRegionSeleccionada(),
-                  textAlign: material.TextAlign.center,
+              const material.SizedBox(height: 8),
+              material.Text(
+                'Casillas iniciales detectadas: ${_casillasIniciales.length}/6 · '
+                'Números distintos: ${_valoresIniciales.length}/6',
+                textAlign: material.TextAlign.center,
+                style: material.TextStyle(
+                  color: _puedeIniciar
+                      ? material.Colors.green.shade800
+                      : material.Colors.black87,
+                  fontWeight: material.FontWeight.bold,
                 ),
+              ),
               if (_mensajeError != null) ...[
                 const material.SizedBox(height: 8),
                 material.Text(
@@ -427,9 +410,11 @@ class _PantallaNumerosInicialesState
                       vertical: 16,
                     ),
                   ),
-                  child: const material.Text(
-                    'Inicio',
-                    style: material.TextStyle(fontSize: 18),
+                  child: material.Text(
+                    _puedeIniciar
+                        ? 'Inicio'
+                        : 'Faltan números iniciales',
+                    style: const material.TextStyle(fontSize: 18),
                   ),
                 ),
               ),

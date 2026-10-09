@@ -159,20 +159,24 @@ class Celda {
     required this.region,
     this.valor,
     this.esInicial = false,
+    this.esJugable = true,
   });
 
   final Region region;
   final int? valor;
   final bool esInicial;
+  final bool esJugable;
 
   Celda copiarCon({
     int? valor,
     bool? esInicial,
+    bool? esJugable,
   }) {
     return Celda(
       region: region,
       valor: valor,
       esInicial: esInicial ?? this.esInicial,
+      esJugable: esJugable ?? this.esJugable,
     );
   }
 }
@@ -182,7 +186,12 @@ List<int> obtenerValoresForIn(
   Region region,
 ) {
   return matriz
-      .where((celda) => celda.region == region && celda.valor != null)
+      .where(
+        (celda) =>
+            celda.esJugable &&
+            celda.region == region &&
+            celda.valor != null,
+      )
       .map((celda) => celda.valor!)
       .toList();
 }
@@ -232,7 +241,9 @@ class ControladorPartida {
         .toList();
 
     if (valores.length != valoresInicialesSeleccionados.length) {
-      throw ArgumentError('Todas las casillas iniciales deben tener un número');
+      throw ArgumentError(
+        'Todas las casillas iniciales deben tener un número',
+      );
     }
 
     if (valores.length != valores.toSet().length) {
@@ -252,35 +263,6 @@ class ControladorPartida {
     _verificarValoresIniciales();
 
     return obtenerValoresForIn(_matriz!, region);
-  }
-
-  bool agregarNumero(Region region, int posible) {
-    _verificarValoresIniciales();
-
-    final valoresActuales = obtenerValoresForIn(_matriz!, region);
-    final tipo = _tiposPorRegion[region]!;
-
-    if (!tipo.esPosibleAgregar(valoresActuales, posible)) {
-      return false;
-    }
-
-    final indice = _matriz!.indexWhere(
-      (celda) =>
-          celda.region == region &&
-          celda.valor == null &&
-          !celda.esInicial,
-    );
-
-    if (indice == -1) {
-      return false;
-    }
-
-    _matriz![indice] = Celda(
-      region: region,
-      valor: posible,
-    );
-
-    return true;
   }
 
   int calcularPuntuacionTotal() {

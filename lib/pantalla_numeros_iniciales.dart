@@ -88,7 +88,14 @@ class _PantallaNumerosInicialesState
   void initState() {
     super.initState();
 
-    const indicesIniciales = {2, 12, 22, 32, 42};
+    const indicesIniciales = {
+      2,
+      12,
+      22,
+      32,
+      42,
+      47,
+    };
 
     _matriz = _distribucion.asMap().entries.map((entrada) {
       return Celda(
@@ -101,7 +108,7 @@ class _PantallaNumerosInicialesState
   void _seleccionarCelda(int indice) {
     if (!_matriz[indice].esInicial) {
       setState(() {
-        _mensajeError = 'Solo puedes seleccionar una casilla inicial.';
+        _mensajeError = 'Solo puedes seleccionar una de las 6 casillas iniciales.';
       });
       return;
     }
@@ -123,7 +130,7 @@ class _PantallaNumerosInicialesState
     if (_indiceSeleccionado == null) {
       setState(() {
         _mensajeError =
-            'Selecciona una casilla inicial antes de colocar un número.';
+            'Selecciona una de las 6 casillas iniciales antes de colocar un número.';
       });
       return;
     }
@@ -143,6 +150,7 @@ class _PantallaNumerosInicialesState
     }
 
     final celdaActual = _matriz[_indiceSeleccionado!];
+
     final valoresRegion = obtenerValoresForIn(
       _matriz,
       celdaActual.region,
@@ -175,7 +183,8 @@ class _PantallaNumerosInicialesState
   void _borrarNumero() {
     if (_indiceSeleccionado == null) {
       setState(() {
-        _mensajeError = 'Selecciona una casilla inicial antes de borrar.';
+        _mensajeError =
+            'Selecciona una de las 6 casillas iniciales antes de borrar.';
       });
       return;
     }
@@ -198,9 +207,20 @@ class _PantallaNumerosInicialesState
   }
 
   bool get _todasLasCasillasInicialesTienenNumero {
-    return _matriz
-        .where((celda) => celda.esInicial)
-        .every((celda) => celda.valor != null);
+    final valores = _matriz
+        .where((celda) => celda.esInicial && celda.valor != null)
+        .map((celda) => celda.valor!)
+        .toSet();
+
+    return valores.length == 6 &&
+        valores.containsAll({
+          1,
+          2,
+          3,
+          4,
+          5,
+          6,
+        });
   }
 
   bool get _noHayNumerosInicialesRepetidos {
@@ -238,6 +258,10 @@ class _PantallaNumerosInicialesState
 
   void _iniciarPartida() {
     if (!_puedeIniciar) {
+      setState(() {
+        _mensajeError =
+            'Coloca los números del 1 al 6, sin repetir y respetando las reglas.';
+      });
       return;
     }
 
@@ -276,6 +300,7 @@ class _PantallaNumerosInicialesState
     }
 
     final region = _matriz[_indiceSeleccionado!].region;
+
     return _tiposPorRegion[region]!.descripcion;
   }
 
@@ -291,7 +316,7 @@ class _PantallaNumerosInicialesState
           child: material.Column(
             children: [
               const material.Text(
-                'Selecciona los números iniciales.',
+                'Selecciona los 6 números iniciales.',
                 textAlign: material.TextAlign.center,
                 style: material.TextStyle(
                   fontSize: 20,
@@ -300,12 +325,12 @@ class _PantallaNumerosInicialesState
               ),
               const material.SizedBox(height: 8),
               const material.Text(
-                'Selecciona una casilla marcada y coloca un número del 1 al 6.',
+                'Selecciona las 6 casillas marcadas y coloca los números del 1 al 6 sin repetir.',
                 textAlign: material.TextAlign.center,
               ),
               const material.SizedBox(height: 8),
               const material.Text(
-                'No se permiten números repetidos.',
+                'Cada número inicial debe respetar la regla de su región.',
                 textAlign: material.TextAlign.center,
               ),
               const material.SizedBox(height: 16),

@@ -48,8 +48,10 @@ class PartidaBloc extends ChangeNotifier {
   }
 
   void establecerDados(int primerDado, int segundoDado) {
-    if (!_esNumeroDeDadoValido(primerDado) ||
-        !_esNumeroDeDadoValido(segundoDado)) {
+    if (primerDado < 1 ||
+        primerDado > 6 ||
+        segundoDado < 1 ||
+        segundoDado > 6) {
       _mensaje = 'Los dados deben tener valores entre 1 y 6.';
       notifyListeners();
       return;
@@ -67,13 +69,13 @@ class PartidaBloc extends ChangeNotifier {
 
   void seleccionarAncla(int ancla) {
     if (!hayDados) {
-      _mensaje = 'Primero selecciona los valores de los dados.';
+      _mensaje = 'Primero establece los valores de los dados.';
       notifyListeners();
       return;
     }
 
     if (ancla != _dadoUno && ancla != _dadoDos) {
-      _mensaje = 'El ancla debe ser uno de los valores de los dados.';
+      _mensaje = 'El ancla debe ser uno de los números de los dados.';
       notifyListeners();
       return;
     }
@@ -139,8 +141,7 @@ class PartidaBloc extends ChangeNotifier {
     _numeroAncla = null;
     _numeroPorColocar = null;
     _indicesPosibles = [];
-    _mensaje = 'Selección de ancla cancelada.';
-
+    _mensaje = 'Selección cancelada.';
     notifyListeners();
   }
 
@@ -157,7 +158,7 @@ class PartidaBloc extends ChangeNotifier {
         continue;
       }
 
-      for (final vecino in _obtenerVecinosOrtogonalmente(indice)) {
+      for (final vecino in _obtenerVecinos(indice)) {
         final destino = matriz[vecino];
 
         if (_esDestinoValido(destino, numeroPorColocar)) {
@@ -169,17 +170,22 @@ class PartidaBloc extends ChangeNotifier {
     return destinos.toList()..sort();
   }
 
-  bool _esDestinoValido(Celda celda, int numeroPorColocar) {
-    if (!celda.esJugable || celda.esInicial || celda.valor != null) {
+  bool _esDestinoValido(
+    Celda celda,
+    int numeroPorColocar,
+  ) {
+    if (!celda.esJugable ||
+        celda.esInicial ||
+        celda.valor != null) {
       return false;
     }
+
+    final tipo = _tipoDeRegion(celda.region);
 
     final valoresActuales = obtenerValoresForIn(
       matriz,
       celda.region,
     );
-
-    final tipo = _tipoDeRegion(celda.region);
 
     return tipo.esPosibleAgregar(
       valoresActuales,
@@ -187,7 +193,7 @@ class PartidaBloc extends ChangeNotifier {
     );
   }
 
-  List<int> _obtenerVecinosOrtogonalmente(int indice) {
+  List<int> _obtenerVecinos(int indice) {
     final fila = indice ~/ columnas;
     final columna = indice % columnas;
     final vecinos = <int>[];
@@ -224,9 +230,5 @@ class PartidaBloc extends ChangeNotifier {
       case Region.morado:
         return TipoMorado();
     }
-  }
-
-  bool _esNumeroDeDadoValido(int numero) {
-    return numero >= 1 && numero <= 6;
   }
 }

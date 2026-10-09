@@ -15,7 +15,7 @@ class Color {
         other is Color &&
             runtimeType == other.runtimeType &&
             value == other.value;
-  }
+  }             
 
   @override
   int get hashCode => value.hashCode;
@@ -265,41 +265,41 @@ class ControladorPartida {
     return obtenerValoresForIn(_matriz!, region);
   }
 
-  bool agregarNumeroEnCelda(int indice, int posible) {
-    _verificarValoresIniciales();
+ bool agregarNumeroEnCelda(int indice, int posible) {
+  _verificarValoresIniciales();
 
-    if (indice < 0 || indice >= _matriz!.length) {
-      return false;
-    }
-
-    if (posible < 1 || posible > 6) {
-      return false;
-    }
-
-    final celda = _matriz![indice];
-
-    if (!celda.esJugable || celda.esInicial || celda.valor != null) {
-      return false;
-    }
-
-    final tipo = _tiposPorRegion[celda.region]!;
-    final valoresActuales = obtenerValoresForIn(
-      _matriz!,
-      celda.region,
-    );
-
-    if (!tipo.esPosibleAgregar(valoresActuales, posible)) {
-      return false;
-    }
-
-    _matriz![indice] = Celda(
-      region: celda.region,
-      valor: posible,
-      esJugable: celda.esJugable,
-    );
-
-    return true;
+  if (indice < 0 || indice >= _matriz!.length) {
+    return false;
   }
+
+  if (posible < 1 || posible > 6) {
+    return false;
+  }
+
+  final celda = _matriz![indice];
+
+  if (!celda.esJugable || celda.esInicial || celda.valor != null) {
+    return false;
+  }
+
+  final tipo = _tiposPorRegion[celda.region]!;
+  final valoresActuales = obtenerValoresForIn(
+    _matriz!,
+    celda.region,
+  );
+
+  if (!tipo.esPosibleAgregar(valoresActuales, posible)) {
+    return false;
+  }
+
+  _matriz![indice] = Celda(
+    region: celda.region,
+    valor: posible,
+    esJugable: celda.esJugable,
+  );
+
+  return true;
+}
 
   int calcularPuntuacionTotal() {
     _verificarValoresIniciales();

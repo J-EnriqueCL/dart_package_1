@@ -23,7 +23,10 @@ class _PantallaPartidaState extends material.State<PantallaPartida> {
   @override
   void initState() {
     super.initState();
-    _bloc = PartidaBloc(controlador: widget.controlador);
+
+    _bloc = PartidaBloc(
+      controlador: widget.controlador,
+    );
   }
 
   @override
@@ -74,7 +77,7 @@ class _PantallaPartidaState extends material.State<PantallaPartida> {
                 ),
                 items: [
                   for (var numero = 1; numero <= 6; numero++)
-                    material.DropdownMenuItem(
+                    material.DropdownMenuItem<int>(
                       value: numero,
                       child: material.Text('$numero'),
                     ),
@@ -93,7 +96,7 @@ class _PantallaPartidaState extends material.State<PantallaPartida> {
                 ),
                 items: [
                   for (var numero = 1; numero <= 6; numero++)
-                    material.DropdownMenuItem(
+                    material.DropdownMenuItem<int>(
                       value: numero,
                       child: material.Text('$numero'),
                     ),
@@ -115,7 +118,11 @@ class _PantallaPartidaState extends material.State<PantallaPartida> {
             ),
             material.ElevatedButton(
               onPressed: () {
-                _bloc.establecerDados(primerDado, segundoDado);
+                _bloc.establecerDados(
+                  primerDado,
+                  segundoDado,
+                );
+
                 material.Navigator.of(contextoDialogo).pop();
               },
               child: const material.Text('Aceptar'),
@@ -245,8 +252,9 @@ class _PantallaPartidaState extends material.State<PantallaPartida> {
                                   ? () => _bloc.colocarNumero(indice)
                                   : null,
                               child: material.AnimatedContainer(
-                                duration:
-                                  const Duration(milliseconds: 180),
+                                duration: const Duration(
+                                  milliseconds: 180,
+                                ),
                                 alignment: material.Alignment.center,
                                 decoration: material.BoxDecoration(
                                   color: _colorVisual(celda.region),

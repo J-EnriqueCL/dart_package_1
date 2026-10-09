@@ -88,15 +88,14 @@ class _PantallaNumerosInicialesState
   void initState() {
     super.initState();
 
-    const indicesIniciales = {
-      2,
-      12,
-      22,
-      32,
-      42,
-      47,
-    };
-
+   const indicesIniciales = {
+  2,
+  12,
+  22,
+  32,
+  34,
+  42,
+};
     _matriz = _distribucion.asMap().entries.map((entrada) {
       return Celda(
         region: entrada.value,

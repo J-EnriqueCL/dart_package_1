@@ -82,6 +82,7 @@ class PartidaBloc extends ChangeNotifier {
 
     _numeroAncla = ancla;
     _numeroPorColocar = otroNumero;
+
     _indicesPosibles = _obtenerDestinosPosibles(
       numeroAncla: ancla,
       numeroPorColocar: otroNumero,
@@ -127,6 +128,7 @@ class PartidaBloc extends ChangeNotifier {
     _numeroAncla = null;
     _numeroPorColocar = null;
     _indicesPosibles = [];
+
     _mensaje =
         'Se colocó el número $numeroColocado. Puntuación actual: $puntuacionTotal.';
 

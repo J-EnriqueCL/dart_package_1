@@ -1,252 +1,169 @@
+import 'dart:math';
+
 import 'package:flutter/foundation.dart';
 
 import '../dart_package_1.dart';
 
 class PartidaBloc extends ChangeNotifier {
-  PartidaBloc({required ControladorPartida controlador})
-    : _controlador = controlador;
-
-  static const int filas = 7;
-  static const int columnas = 7;
+  PartidaBloc(this._controlador);
 
   final ControladorPartida _controlador;
+  final Random _azar = Random();
 
-  int? _dadoUno;
-  int? _dadoDos;
-  int? _numeroAncla;
-  int? _numeroPorColocar;
-
-  List<int> _indicesPosibles = [];
-
+  List<int>? _dados;
+  List<bool> _movimientosPorDado = [false, false];
+  int? _posicionAncla;
+  Set<int> _destinos = {};
   int _turno = 1;
-
-  String _mensaje = 'Presiona “Tirar dados” para iniciar un turno.';
+  String _mensaje = 'Tira los dados para comenzar.';
 
   List<Celda> get matriz => _controlador.matriz;
-
-  int? get dadoUno => _dadoUno;
-
-  int? get dadoDos => _dadoDos;
-
-  int? get numeroAncla => _numeroAncla;
-
-  int? get numeroPorColocar => _numeroPorColocar;
-
+  List<Area> get areas => _controlador.areas;
   int get turno => _turno;
-
   String get mensaje => _mensaje;
+  List<int>? get dados => _dados;
+  bool get hayDados => _dados != null;
+  int? get posicionAncla => _posicionAncla;
+  int get puntuacionTotal => _controlador.puntuacionTotal;
 
-  int get puntuacionTotal => _controlador.calcularPuntuacionTotal();
-
-  bool get hayDados {
-    return _dadoUno != null && _dadoDos != null;
+  int? get numeroAncla {
+    if (_dados == null || _posicionAncla == null) {
+      return null;
+    }
+    return _dados![_posicionAncla!];
   }
 
-  bool get esperandoAncla {
-    return hayDados && _numeroAncla == null && _numeroPorColocar == null;
+  int? get numeroPorColocar {
+    if (_dados == null || _posicionAncla == null) {
+      return null;
+    }
+    return _dados![1 - _posicionAncla!];
   }
 
-  bool get esperandoDestino {
-    return _numeroAncla != null && _numeroPorColocar != null;
+  bool dadoTieneMovimientos(int posicion) => _movimientosPorDado[posicion];
+
+  bool esDestino(int indice) => _destinos.contains(indice);
+
+  bool esCeldaAncla(int indice) {
+    final ancla = numeroAncla;
+    return ancla != null && matriz[indice].valor == ancla;
   }
 
-  bool esDestinoPosible(int indice) {
-    return _indicesPosibles.contains(indice);
+  bool celdaEnAreaCompleta(int indice) {
+    return _controlador.areaCompleta(_controlador.areaDeCelda(indice));
   }
 
-  void lanzarDados(int dadoUno, int dadoDos) {
-    if (dadoUno < 1 || dadoUno > 6 || dadoDos < 1 || dadoDos > 6) {
-      _mensaje = 'Los valores de los dados deben estar entre 1 y 6.';
+  int puntosDeRegion(Region region) => _controlador.puntosDeRegion(region);
+
+  int totalAreas(Region region) => _controlador.areasDe(region).length;
+
+  int areasCompletas(Region region) {
+    return _controlador.areasDe(region).where(_controlador.areaCompleta).length;
+  }
+
+  int casillasLlenas(Area area) => _controlador.casillasLlenas(area);
+
+  bool areaCompleta(Area area) => _controlador.areaCompleta(area);
+
+  void tirarDados() {
+    if (hayDados) {
+      _mensaje = 'Primero coloca un número o pasa el turno.';
       notifyListeners();
       return;
     }
 
-    _dadoUno = dadoUno;
-    _dadoDos = dadoDos;
+    final dados = [_azar.nextInt(6) + 1, _azar.nextInt(6) + 1];
 
-    _numeroAncla = null;
-    _numeroPorColocar = null;
-    _indicesPosibles = [];
+    _dados = dados;
+    _posicionAncla = null;
+    _destinos = {};
+    _movimientosPorDado = [
+      _controlador
+          .destinosPosibles(ancla: dados[0], colocar: dados[1])
+          .isNotEmpty,
+      _controlador
+          .destinosPosibles(ancla: dados[1], colocar: dados[0])
+          .isNotEmpty,
+    ];
 
-    _mensaje =
-        'Dados lanzados: $dadoUno y $dadoDos. Toca uno para elegir el ancla.';
+    if (_movimientosPorDado.contains(true)) {
+      _mensaje = 'Salieron ${dados[0]} y ${dados[1]}. Toca un dado para elegirlo como ancla.';
+    } else {
+      _mensaje = 'Salieron ${dados[0]} y ${dados[1]}, pero no hay movimientos. Pasa el turno.';
+    }
 
     notifyListeners();
   }
 
-  void seleccionarAncla(int numeroAncla) {
+  void seleccionarAncla(int posicion) {
     if (!hayDados) {
-      _mensaje = 'Primero debes tirar los dados.';
+      return;
+    }
+
+    if (_posicionAncla == posicion) {
+      _posicionAncla = null;
+      _destinos = {};
+      _mensaje = 'Toca un dado para elegirlo como ancla.';
       notifyListeners();
       return;
     }
 
-    if (numeroAncla != _dadoUno && numeroAncla != _dadoDos) {
-      _mensaje = 'El ancla debe ser uno de los dos resultados.';
-      notifyListeners();
-      return;
-    }
-
-    final numeroPorColocar = numeroAncla == _dadoUno ? _dadoDos! : _dadoUno!;
-
-    _numeroAncla = numeroAncla;
-    _numeroPorColocar = numeroPorColocar;
-
-    _indicesPosibles = _buscarDestinosPosibles(
-      numeroAncla: numeroAncla,
-      numeroPorColocar: numeroPorColocar,
+    _posicionAncla = posicion;
+    _destinos = _controlador.destinosPosibles(
+      ancla: numeroAncla!,
+      colocar: numeroPorColocar!,
     );
 
-    if (_indicesPosibles.isEmpty) {
-      _mensaje =
-          'No hay una casilla válida para colocar $numeroPorColocar junto a un $numeroAncla.';
+    if (_destinos.isEmpty) {
+      _mensaje = 'No hay lugar para el $numeroPorColocar junto a un $numeroAncla. Elige el otro dado.';
     } else {
-      _mensaje =
-          'Ancla: $numeroAncla. Coloca $numeroPorColocar en una casilla iluminada.';
+      _mensaje = 'Ancla $numeroAncla. Coloca el $numeroPorColocar en una casilla iluminada.';
     }
 
     notifyListeners();
   }
 
-  void colocarNumero(int indiceDestino) {
-    if (!esperandoDestino) {
-      _mensaje = 'Primero toca uno de los dados para elegir el ancla.';
+  void colocar(int indice) {
+    if (!hayDados || _posicionAncla == null || !_destinos.contains(indice)) {
+      return;
+    }
+
+    final numero = numeroPorColocar!;
+    final puntosAntes = puntuacionTotal;
+
+    if (!_controlador.colocar(indice, numero)) {
+      _mensaje = 'Ese número no cumple la regla del área.';
       notifyListeners();
       return;
     }
 
-    if (!_indicesPosibles.contains(indiceDestino)) {
-      _mensaje = 'Solo puedes tocar una casilla iluminada.';
-      notifyListeners();
-      return;
-    }
+    final ganados = puntuacionTotal - puntosAntes;
 
-    final numero = _numeroPorColocar!;
+    _mensaje = ganados > 0
+        ? '¡Área completada! +$ganados puntos. Tira los dados.'
+        : 'Colocaste el $numero. Tira los dados.';
 
-    final seColoco = _controlador.agregarNumeroEnCelda(indiceDestino, numero);
-
-    if (!seColoco) {
-      _mensaje =
-          'No se pudo colocar $numero porque la regla de la región no lo permite.';
-      notifyListeners();
-      return;
-    }
-
-    _numeroAncla = null;
-    _numeroPorColocar = null;
-    _indicesPosibles = [];
-
+    _dados = null;
+    _posicionAncla = null;
+    _destinos = {};
+    _movimientosPorDado = [false, false];
     _turno++;
 
-    _mensaje =
-        'Se colocó $numero. Puntuación: $puntuacionTotal. '
-        'Presiona “Tirar dados” para continuar.';
-
     notifyListeners();
   }
 
-  void cancelarSeleccionAncla() {
+  void pasarTurno() {
     if (!hayDados) {
       return;
     }
 
-    _numeroAncla = null;
-    _numeroPorColocar = null;
-    _indicesPosibles = [];
-
-    _mensaje = 'Toca uno de los dados para elegir el ancla.';
+    _dados = null;
+    _posicionAncla = null;
+    _destinos = {};
+    _movimientosPorDado = [false, false];
+    _turno++;
+    _mensaje = 'Turno pasado. Tira los dados.';
 
     notifyListeners();
-  }
-
-  List<int> _buscarDestinosPosibles({
-    required int numeroAncla,
-    required int numeroPorColocar,
-  }) {
-    final destinos = <int>{};
-
-    for (var indiceAncla = 0; indiceAncla < matriz.length; indiceAncla++) {
-      final celdaAncla = matriz[indiceAncla];
-
-      if (celdaAncla.valor != numeroAncla) {
-        continue;
-      }
-
-      for (final indiceVecino in _obtenerVecinos(indiceAncla)) {
-        final celdaDestino = matriz[indiceVecino];
-
-        if (_esDestinoValido(
-          celdaDestino: celdaDestino,
-          numeroPorColocar: numeroPorColocar,
-        )) {
-          destinos.add(indiceVecino);
-        }
-      }
-    }
-
-    return destinos.toList()..sort();
-  }
-
-  bool _esDestinoValido({
-    required Celda celdaDestino,
-    required int numeroPorColocar,
-  }) {
-    if (!celdaDestino.esJugable) {
-      return false;
-    }
-
-    if (celdaDestino.esInicial) {
-      return false;
-    }
-
-    if (celdaDestino.valor != null) {
-      return false;
-    }
-
-    final tipo = _obtenerTipo(celdaDestino.region);
-
-    final valoresEnRegion = obtenerValoresForIn(matriz, celdaDestino.region);
-
-    return tipo.esPosibleAgregar(valoresEnRegion, numeroPorColocar);
-  }
-
-  List<int> _obtenerVecinos(int indice) {
-    final fila = indice ~/ columnas;
-    final columna = indice % columnas;
-
-    final vecinos = <int>[];
-
-    if (fila > 0) {
-      vecinos.add(indice - columnas);
-    }
-
-    if (fila < filas - 1) {
-      vecinos.add(indice + columnas);
-    }
-
-    if (columna > 0) {
-      vecinos.add(indice - 1);
-    }
-
-    if (columna < columnas - 1) {
-      vecinos.add(indice + 1);
-    }
-
-    return vecinos;
-  }
-
-  Tipo _obtenerTipo(Region region) {
-    switch (region) {
-      case Region.verde:
-        return TipoVerde();
-      case Region.azul:
-        return TipoAzul();
-      case Region.amarillo:
-        return TipoAmarillo();
-      case Region.rojo:
-        return TipoRojo();
-      case Region.morado:
-        return TipoMorado();
-    }
   }
 }

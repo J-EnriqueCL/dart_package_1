@@ -5,10 +5,11 @@ import 'package:flutter/foundation.dart';
 import '../dart_package_1.dart';
 
 class PartidaBloc extends ChangeNotifier {
-  PartidaBloc(this._controlador);
+  /// [azar] permite inyectar una fuente de dados determinista (pruebas).
+  PartidaBloc(this._controlador, {Random? azar}) : _azar = azar ?? Random();
 
   final ControladorPartida _controlador;
-  final Random _azar = Random();
+  final Random _azar;
 
   List<int>? _dados;
   List<bool> _movimientosPorDado = [false, false];
@@ -87,9 +88,11 @@ class PartidaBloc extends ChangeNotifier {
     ];
 
     if (_movimientosPorDado.contains(true)) {
-      _mensaje = 'Salieron ${dados[0]} y ${dados[1]}. Toca un dado para elegirlo como ancla.';
+      _mensaje =
+          'Salieron ${dados[0]} y ${dados[1]}. Toca un dado para elegirlo como ancla.';
     } else {
-      _mensaje = 'Salieron ${dados[0]} y ${dados[1]}, pero no hay movimientos. Pasa el turno.';
+      _mensaje =
+          'Salieron ${dados[0]} y ${dados[1]}, pero no hay movimientos. Pasa el turno.';
     }
 
     notifyListeners();
@@ -115,9 +118,11 @@ class PartidaBloc extends ChangeNotifier {
     );
 
     if (_destinos.isEmpty) {
-      _mensaje = 'No hay lugar para el $numeroPorColocar junto a un $numeroAncla. Elige el otro dado.';
+      _mensaje =
+          'No hay lugar para el $numeroPorColocar junto a un $numeroAncla. Elige el otro dado.';
     } else {
-      _mensaje = 'Ancla $numeroAncla. Coloca el $numeroPorColocar en una casilla iluminada.';
+      _mensaje =
+          'Ancla $numeroAncla. Coloca el $numeroPorColocar en una casilla iluminada.';
     }
 
     notifyListeners();

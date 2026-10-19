@@ -1,3 +1,5 @@
+import 'dart:math';
+
 import 'package:flutter/material.dart';
 
 import 'bloc/partida_bloc.dart';
@@ -6,9 +8,12 @@ import 'tema.dart';
 import 'widgets/celda_gema.dart';
 
 class PantallaPartida extends StatefulWidget {
-  const PantallaPartida({super.key, required this.controlador});
+  const PantallaPartida({super.key, required this.controlador, this.azar});
 
   final ControladorPartida controlador;
+
+  /// Fuente de azar para los dados; si es null se usa `Random()`.
+  final Random? azar;
 
   @override
   State<PantallaPartida> createState() => _PantallaPartidaState();
@@ -20,7 +25,7 @@ class _PantallaPartidaState extends State<PantallaPartida> {
   @override
   void initState() {
     super.initState();
-    _bloc = PartidaBloc(widget.controlador);
+    _bloc = PartidaBloc(widget.controlador, azar: widget.azar);
   }
 
   @override
@@ -30,7 +35,8 @@ class _PantallaPartidaState extends State<PantallaPartida> {
   }
 
   void _mostrarDetalle() {
-    final areas = [..._bloc.areas]..sort((a, b) {
+    final areas = [..._bloc.areas]
+      ..sort((a, b) {
         if (a.region.index != b.region.index) {
           return a.region.index.compareTo(b.region.index);
         }
@@ -262,6 +268,7 @@ class _PantallaPartidaState extends State<PantallaPartida> {
               for (var posicion = 0; posicion < 2; posicion++) ...[
                 if (posicion == 1) const SizedBox(width: 18),
                 _Dado(
+                  key: Key('dado_$posicion'),
                   valor: dados?[posicion],
                   rol: rol(posicion),
                   activo: dados == null || _bloc.dadoTieneMovimientos(posicion),
@@ -277,6 +284,7 @@ class _PantallaPartidaState extends State<PantallaPartida> {
             children: [
               Expanded(
                 child: FilledButton.icon(
+                  key: const Key('boton_tirar_dados'),
                   onPressed: _bloc.hayDados ? null : _bloc.tirarDados,
                   icon: const Icon(Icons.casino_rounded),
                   label: const Text('Tirar dados'),
@@ -333,6 +341,7 @@ class _PantallaPartidaState extends State<PantallaPartida> {
                             celdas: [
                               for (var i = 0; i < matriz.length; i++)
                                 CeldaGema(
+                                  key: Key('celda_$i'),
                                   region: matriz[i].region,
                                   valor: matriz[i].valor,
                                   vistaPrevia: _bloc.numeroPorColocar,
@@ -402,6 +411,7 @@ enum _RolDado { ninguno, ancla, aColocar }
 
 class _Dado extends StatelessWidget {
   const _Dado({
+    super.key,
     required this.valor,
     required this.rol,
     required this.activo,

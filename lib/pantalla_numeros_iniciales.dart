@@ -1,3 +1,5 @@
+import 'dart:math';
+
 import 'package:flutter/material.dart';
 
 import 'dart_package_1.dart';
@@ -6,7 +8,10 @@ import 'tema.dart';
 import 'widgets/celda_gema.dart';
 
 class PantallaNumerosIniciales extends StatefulWidget {
-  const PantallaNumerosIniciales({super.key});
+  const PantallaNumerosIniciales({super.key, this.azar});
+
+  /// Fuente de azar que se pasa a la partida; si es null se usa `Random()`.
+  final Random? azar;
 
   @override
   State<PantallaNumerosIniciales> createState() =>
@@ -30,6 +35,11 @@ class _PantallaNumerosInicialesState extends State<PantallaNumerosIniciales> {
         .map((celda) => celda.valor)
         .whereType<int>()
         .toSet();
+  }
+
+  /// Posición (0..5) de la casilla inicial dentro del tablero.
+  int _posicionInicial(int indice) {
+    return _matriz.take(indice).where((celda) => celda.esInicial).length;
   }
 
   bool get _completo => _usados.length == 6;
@@ -102,7 +112,8 @@ class _PantallaNumerosInicialesState extends State<PantallaNumerosIniciales> {
 
     Navigator.of(context).push(
       MaterialPageRoute<void>(
-        builder: (_) => PantallaPartida(controlador: controlador),
+        builder: (_) =>
+            PantallaPartida(controlador: controlador, azar: widget.azar),
       ),
     );
   }
@@ -110,8 +121,9 @@ class _PantallaNumerosInicialesState extends State<PantallaNumerosIniciales> {
   @override
   Widget build(BuildContext context) {
     final usados = _usados;
-    final valorSeleccionado =
-        _seleccionada == null ? null : _matriz[_seleccionada!].valor;
+    final valorSeleccionado = _seleccionada == null
+        ? null
+        : _matriz[_seleccionada!].valor;
 
     return Scaffold(
       body: FondoJuego(
@@ -148,6 +160,9 @@ class _PantallaNumerosInicialesState extends State<PantallaNumerosIniciales> {
                         celdas: [
                           for (var i = 0; i < _matriz.length; i++)
                             CeldaGema(
+                              key: _matriz[i].esInicial
+                                  ? Key('inicial_${_posicionInicial(i)}')
+                                  : Key('celda_$i'),
                               region: _matriz[i].region,
                               valor: _matriz[i].valor,
                               esInicial: _matriz[i].esInicial,
@@ -163,8 +178,9 @@ class _PantallaNumerosInicialesState extends State<PantallaNumerosIniciales> {
                     padding: const EdgeInsets.fromLTRB(16, 14, 16, 16),
                     decoration: const BoxDecoration(
                       color: Tema.panel,
-                      borderRadius:
-                          BorderRadius.vertical(top: Radius.circular(26)),
+                      borderRadius: BorderRadius.vertical(
+                        top: Radius.circular(26),
+                      ),
                     ),
                     child: Column(
                       mainAxisSize: MainAxisSize.min,
@@ -188,7 +204,9 @@ class _PantallaNumerosInicialesState extends State<PantallaNumerosIniciales> {
                                 width: 52,
                                 height: 52,
                                 child: FilledButton(
-                                  onPressed: usados.contains(numero) &&
+                                  key: Key('numero_$numero'),
+                                  onPressed:
+                                      usados.contains(numero) &&
                                           valorSeleccionado != numero
                                       ? null
                                       : () => _poner(numero),
@@ -227,6 +245,7 @@ class _PantallaNumerosInicialesState extends State<PantallaNumerosIniciales> {
                         SizedBox(
                           width: double.infinity,
                           child: FilledButton.icon(
+                            key: const Key('boton_inicio'),
                             onPressed: _completo ? _iniciar : null,
                             icon: const Icon(Icons.play_arrow_rounded),
                             label: const Text('Inicio'),

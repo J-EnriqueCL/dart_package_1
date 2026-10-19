@@ -1,10 +1,4 @@
-enum Region {
-  verde,
-  azul,
-  amarillo,
-  rojo,
-  morado,
-}
+enum Region { verde, azul, amarillo, rojo, morado }
 
 extension ReglasDeRegion on Region {
   String get nombre {
@@ -46,19 +40,14 @@ extension ReglasDeRegion on Region {
         return true;
 
       case Region.azul:
-        return valoresDelArea.every(
-          (valor) => valor == nuevo,
-        );
+        return valoresDelArea.every((valor) => valor == nuevo);
 
       case Region.amarillo:
       case Region.rojo:
         return !valoresDelArea.contains(nuevo);
 
       case Region.morado:
-        final distintos = <int>{
-          ...valoresDelArea,
-          nuevo,
-        };
+        final distintos = <int>{...valoresDelArea, nuevo};
 
         return distintos.length <= 2;
     }
@@ -78,10 +67,7 @@ class Celda {
   final bool esJugable;
   final bool esInicial;
 
-  Celda copiarCon({
-    int? valor,
-    bool borrarValor = false,
-  }) {
+  Celda copiarCon({int? valor, bool borrarValor = false}) {
     return Celda(
       region: region,
       valor: borrarValor ? null : valor ?? this.valor,
@@ -151,14 +137,7 @@ List<Celda> crearTableroNivelUno() {
   // 46 = fila 7, columna 5: rojo
   //
   // No se precargan números.
-  const indicesIniciales = <int>{
-    2,
-    12,
-    22,
-    25,
-    37,
-    46,
-  };
+  const indicesIniciales = <int>{2, 12, 22, 25, 37, 46};
 
   final celdas = <Celda>[];
 
@@ -212,7 +191,7 @@ class ControladorPartida {
     }
 
     if (columna > 0) {
-      vecinos.add(indice -1);
+      vecinos.add(indice - 1);
     }
 
     if (columna < columnas - 1) {
@@ -236,19 +215,13 @@ class ControladorPartida {
 
   void establecerValoresIniciales(List<Celda> celdas) {
     if (celdas.length != filas * columnas) {
-      throw ArgumentError(
-        'El tablero debe tener exactamente 49 celdas.',
-      );
+      throw ArgumentError('El tablero debe tener exactamente 49 celdas.');
     }
 
-    final iniciales = celdas
-        .where((celda) => celda.esInicial)
-        .toList();
+    final iniciales = celdas.where((celda) => celda.esInicial).toList();
 
     if (iniciales.length != 6) {
-      throw ArgumentError(
-        'Debe haber exactamente 6 casillas iniciales.',
-      );
+      throw ArgumentError('Debe haber exactamente 6 casillas iniciales.');
     }
 
     final valores = iniciales
@@ -256,20 +229,10 @@ class ControladorPartida {
         .whereType<int>()
         .toSet();
 
-    const requeridos = <int>{
-      1,
-      2,
-      3,
-      4,
-      5,
-      6,
-    };
+    const requeridos = <int>{1, 2, 3, 4, 5, 6};
 
-    if (valores.length != 6 ||
-        !valores.containsAll(requeridos)) {
-      throw ArgumentError(
-        'Coloca los números del 1 al 6 sin repetir.',
-      );
+    if (valores.length != 6 || !valores.containsAll(requeridos)) {
+      throw ArgumentError('Coloca los números del 1 al 6 sin repetir.');
     }
 
     _matriz = List<Celda>.of(celdas);
@@ -278,19 +241,11 @@ class ControladorPartida {
   }
 
   List<int> _vecinosParaFormarArea(int indice) {
-    final vecinos = <int>{
-      ...vecinosDe(indice),
-    };
+    final vecinos = <int>{...vecinosDe(indice)};
 
     // Las cuatro esquinas amarillas y la casilla amarilla
     // central se consideran una misma región amarilla.
-    const amarillasConectadas = <int>{
-      0,
-      6,
-      24,
-      42,
-      48,
-    };
+    const amarillasConectadas = <int>{0, 6, 24, 42, 48};
 
     if (amarillasConectadas.contains(indice)) {
       vecinos.addAll(amarillasConectadas);
@@ -400,30 +355,19 @@ class ControladorPartida {
 
     final celda = _matriz![indice];
 
-    if (!celda.esJugable ||
-        celda.esInicial ||
-        celda.valor != null) {
+    if (!celda.esJugable || celda.esInicial || celda.valor != null) {
       return false;
     }
 
     final area = areaDeCelda(indice);
 
-    return area.region.permite(
-      valoresDelArea(area),
-      numero,
-    );
+    return area.region.permite(valoresDelArea(area), numero);
   }
 
-  Set<int> destinosPosibles({
-    required int ancla,
-    required int colocar,
-  }) {
+  Set<int> destinosPosibles({required int ancla, required int colocar}) {
     _verificarTablero();
 
-    if (ancla < 1 ||
-        ancla > 6 ||
-        colocar < 1 ||
-        colocar > 6) {
+    if (ancla < 1 || ancla > 6 || colocar < 1 || colocar > 6) {
       return <int>{};
     }
 
@@ -449,9 +393,7 @@ class ControladorPartida {
       return false;
     }
 
-    _matriz![indice] = _matriz![indice].copiarCon(
-      valor: numero,
-    );
+    _matriz![indice] = _matriz![indice].copiarCon(valor: numero);
 
     return true;
   }
@@ -463,32 +405,23 @@ class ControladorPartida {
   List<Area> areasDe(Region region) {
     _verificarTablero();
 
-    return _areas
-        .where((area) => area.region == region)
-        .toList();
+    return _areas.where((area) => area.region == region).toList();
   }
 
   int puntosDeRegion(Region region) {
-    return areasDe(region).fold<int>(
-      0,
-      (total, area) => total + puntosDeArea(area),
-    );
+    return areasDe(region)
+        .fold<int>(0, (total, area) => total + puntosDeArea(area));
   }
 
   int get puntuacionTotal {
     _verificarTablero();
 
-    return _areas.fold<int>(
-      0,
-      (total, area) => total + puntosDeArea(area),
-    );
+    return _areas.fold<int>(0, (total, area) => total + puntosDeArea(area));
   }
 
   void _verificarTablero() {
     if (_matriz == null) {
-      throw StateError(
-        'Primero debes establecer los valores iniciales.',
-      );
+      throw StateError('Primero debes establecer los valores iniciales.');
     }
   }
 }

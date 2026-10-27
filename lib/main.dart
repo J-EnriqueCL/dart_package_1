@@ -1,6 +1,6 @@
 import 'package:flutter/material.dart';
 
-import 'pantalla_numeros_iniciales.dart';
+import 'pantalla_seleccion_mapa.dart';
 
 void main() {
   runApp(const AplicacionBrilliant());
@@ -19,7 +19,7 @@ class AplicacionBrilliant extends StatelessWidget {
         brightness: Brightness.dark,
         colorSchemeSeed: Colors.deepPurple,
       ),
-      home: const PantallaNumerosIniciales(),
+      home: const PantallaSeleccionMapa(),
     );
   }
 }

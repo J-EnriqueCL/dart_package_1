@@ -155,13 +155,18 @@ class _PantallaPartidaState extends State<PantallaPartida> {
             onPressed: () => Navigator.of(context).pop(),
             icon: const Icon(Icons.arrow_back_rounded, color: Colors.white),
           ),
-          const Text(
-            'BRILLIANT',
-            style: TextStyle(
-              color: Colors.white,
-              fontSize: 20,
-              fontWeight: FontWeight.w900,
-              letterSpacing: 3,
+          const Flexible(
+            child: FittedBox(
+              fit: BoxFit.scaleDown,
+              child: Text(
+                'BRILLIANT',
+                style: TextStyle(
+                  color: Colors.white,
+                  fontSize: 20,
+                  fontWeight: FontWeight.w900,
+                  letterSpacing: 3,
+                ),
+              ),
             ),
           ),
           const Spacer(),
@@ -182,7 +187,7 @@ class _PantallaPartidaState extends State<PantallaPartida> {
       padding: const EdgeInsets.symmetric(horizontal: 9),
       child: Row(
         children: [
-          for (final region in Region.values)
+          for (final region in _bloc.regiones)
             Expanded(
               child: Padding(
                 padding: const EdgeInsets.symmetric(horizontal: 3),

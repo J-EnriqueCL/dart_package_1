@@ -1,4 +1,6 @@
-enum Region { verde, azul, amarillo, rojo, morado }
+import 'mapas.dart';
+
+enum Region { verde, azul, amarillo, rojo, morado, naranja, blanco }
 
 extension ReglasDeRegion on Region {
   String get nombre {
@@ -13,17 +15,23 @@ extension ReglasDeRegion on Region {
         return 'Rojo';
       case Region.morado:
         return 'Morado';
+      case Region.naranja:
+        return 'Naranja';
+      case Region.blanco:
+        return 'Blanco';
     }
   }
 
   String get regla {
     switch (this) {
       case Region.verde:
+      case Region.blanco:
         return 'Cualquier número.';
       case Region.azul:
         return 'Todos los números deben ser iguales.';
       case Region.amarillo:
       case Region.rojo:
+      case Region.naranja:
         return 'Todos los números deben ser distintos.';
       case Region.morado:
         return 'Máximo dos números distintos.';
@@ -37,6 +45,7 @@ extension ReglasDeRegion on Region {
 
     switch (this) {
       case Region.verde:
+      case Region.blanco:
         return true;
 
       case Region.azul:
@@ -44,6 +53,7 @@ extension ReglasDeRegion on Region {
 
       case Region.amarillo:
       case Region.rojo:
+      case Region.naranja:
         return !valoresDelArea.contains(nuevo);
 
       case Region.morado:
@@ -93,76 +103,25 @@ class Area {
   int get tamano => indices.length;
 }
 
-Region _regionDeLetra(String letra) {
-  switch (letra) {
-    case 'V':
-      return Region.verde;
-    case 'B':
-      return Region.azul;
-    case 'A':
-      return Region.amarillo;
-    case 'R':
-      return Region.rojo;
-    case 'M':
-      return Region.morado;
-    default:
-      throw ArgumentError('Color no reconocido: $letra');
-  }
-}
-
-List<Celda> crearTableroNivelUno() {
-  // A = amarillo
-  // V = verde
-  // B = azul
-  // R = rojo
-  // M = morado
-  const plano = <String>[
-    'AVBMMMA',
-    'VVBBMMV',
-    'VRRBMVV',
-    'VRMAVVV',
-    'VRMMRRB',
-    'RRMRRBB',
-    'AMMRRBA',
-  ];
-
-  // Posiciones iniciales de la nueva imagen.
-  // Filas y columnas contadas desde 1.
-  //
-  // 2  = fila 1, columna 3: azul
-  // 12 = fila 2, columna 6: morado
-  // 22 = fila 4, columna 2: rojo
-  // 25 = fila 4, columna 5: verde
-  // 37 = fila 6, columna 3: morado
-  // 46 = fila 7, columna 5: rojo
-  //
-  // No se precargan números.
-  const indicesIniciales = <int>{2, 12, 22, 25, 37, 46};
-
-  final celdas = <Celda>[];
-
-  for (var fila = 0; fila < 7; fila++) {
-    for (var columna = 0; columna < 7; columna++) {
-      final indice = fila * 7 + columna;
-
-      celdas.add(
-        Celda(
-          region: _regionDeLetra(plano[fila][columna]),
-          esInicial: indicesIniciales.contains(indice),
-        ),
-      );
-    }
-  }
-
-  return celdas;
-}
+List<Celda> crearTableroNivelUno() => mapasOficiales.first.crearTablero();
 
 class ControladorPartida {
+  /// [gruposConectados]: casillas no contiguas que forman una misma área.
+  /// Por omisión, las del nivel uno.
+  ControladorPartida({List<Set<int>>? gruposConectados})
+    : _gruposConectados =
+          gruposConectados ?? mapasOficiales.first.gruposConectados;
+
+  final List<Set<int>> _gruposConectados;
+
   static const int filas = 7;
   static const int columnas = 7;
 
   static const Map<Region, int> puntosPorRegion = {
+    // Puntos y reglas de naranja y blanco provisionales (copian rojo y verde).
     Region.verde: 4,
+    Region.naranja: 6,
+    Region.blanco: 4,
     Region.azul: 7,
     Region.amarillo: 8,
     Region.rojo: 6,
@@ -243,12 +202,10 @@ class ControladorPartida {
   List<int> _vecinosParaFormarArea(int indice) {
     final vecinos = <int>{...vecinosDe(indice)};
 
-    // Las cuatro esquinas amarillas y la casilla amarilla
-    // central se consideran una misma región amarilla.
-    const amarillasConectadas = <int>{0, 6, 24, 42, 48};
-
-    if (amarillasConectadas.contains(indice)) {
-      vecinos.addAll(amarillasConectadas);
+    for (final grupo in _gruposConectados) {
+      if (grupo.contains(indice)) {
+        vecinos.addAll(grupo);
+      }
     }
 
     vecinos.remove(indice);

@@ -8,7 +8,9 @@
       "Bash(taskkill //F //IM dart.exe //IM flutter_tester.exe)",
       "Bash(sed -i \"/^import 'dart:typed_data';/d; /^ await cargarFuentes\\(\\);/d\" test/ayudas_pruebas.dart)",
       "Bash(sed -i \"s/^void main\\(\\) {/void main\\(\\) {\\\\n setUpAll\\(cargarFuentes\\);\\\\n/\" test/camino_feliz_widget_test.dart test/pantalla_partida_golden_test.dart test/pantalla_numeros_iniciales_golden_test.dart)",
-      "Bash(timeout 400 flutter test --update-goldens)"
+      "Bash(timeout 400 flutter test --update-goldens)",
+      "Bash(python -c ' *)",
+      "Bash(node -e ' *)"
     ]
   }
 }

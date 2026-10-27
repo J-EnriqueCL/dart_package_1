@@ -8,7 +8,10 @@ import 'tema.dart';
 import 'widgets/celda_gema.dart';
 
 class PantallaNumerosIniciales extends StatefulWidget {
-  const PantallaNumerosIniciales({super.key, this.azar});
+  const PantallaNumerosIniciales({super.key, this.azar, this.mapa});
+
+  /// Mapa a jugar; si es null se usa el nivel uno.
+  final MapaOficial? mapa;
 
   /// Fuente de azar que se pasa a la partida; si es null se usa `Random()`.
   final Random? azar;
@@ -19,6 +22,7 @@ class PantallaNumerosIniciales extends StatefulWidget {
 }
 
 class _PantallaNumerosInicialesState extends State<PantallaNumerosIniciales> {
+  late final MapaOficial _mapa;
   late List<Celda> _matriz;
   int? _seleccionada;
   String _mensaje = 'Toca una casilla con estrella y elige su número.';
@@ -26,7 +30,8 @@ class _PantallaNumerosInicialesState extends State<PantallaNumerosIniciales> {
   @override
   void initState() {
     super.initState();
-    _matriz = crearTableroNivelUno();
+    _mapa = widget.mapa ?? mapasOficiales.first;
+    _matriz = _mapa.crearTablero();
   }
 
   Set<int> get _usados {
@@ -99,7 +104,9 @@ class _PantallaNumerosInicialesState extends State<PantallaNumerosIniciales> {
   }
 
   void _iniciar() {
-    final controlador = ControladorPartida();
+    final controlador = ControladorPartida(
+      gruposConectados: _mapa.gruposConectados,
+    );
 
     try {
       controlador.establecerValoresIniciales(_matriz);
@@ -133,17 +140,45 @@ class _PantallaNumerosInicialesState extends State<PantallaNumerosIniciales> {
               constraints: const BoxConstraints(maxWidth: 720),
               child: Column(
                 children: [
-                  const Padding(
-                    padding: EdgeInsets.only(top: 14, bottom: 2),
-                    child: Text(
-                      'BRILLIANT',
-                      style: TextStyle(
-                        color: Colors.white,
-                        fontSize: 26,
-                        fontWeight: FontWeight.w900,
-                        letterSpacing: 4,
+                  Stack(
+                    alignment: Alignment.center,
+                    children: [
+                      if (Navigator.of(context).canPop())
+                        Align(
+                          alignment: Alignment.centerLeft,
+                          child: IconButton(
+                            tooltip: 'Elegir otro mapa',
+                            onPressed: () => Navigator.of(context).pop(),
+                            icon: const Icon(
+                              Icons.arrow_back_rounded,
+                              color: Colors.white,
+                            ),
+                          ),
+                        ),
+                      Padding(
+                        padding: const EdgeInsets.only(top: 14, bottom: 2),
+                        child: Column(
+                          children: [
+                            const Text(
+                              'BRILLIANT',
+                              style: TextStyle(
+                                color: Colors.white,
+                                fontSize: 26,
+                                fontWeight: FontWeight.w900,
+                                letterSpacing: 4,
+                              ),
+                            ),
+                            Text(
+                              _mapa.nombre,
+                              style: const TextStyle(
+                                color: Tema.dorado,
+                                fontWeight: FontWeight.w800,
+                              ),
+                            ),
+                          ],
+                        ),
                       ),
-                    ),
+                    ],
                   ),
                   const Text(
                     'Coloca los números del 1 al 6 en las casillas con estrella',

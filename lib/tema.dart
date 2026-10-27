@@ -22,11 +22,17 @@ class Tema {
         return const Color(0xFFE23B4E);
       case Region.morado:
         return const Color(0xFF9B4FD0);
+      case Region.naranja:
+        return const Color(0xFFFF8A2A);
+      case Region.blanco:
+        return const Color(0xFFE6E6EE);
     }
   }
 
   static Color colorTexto(Region region) {
-    return region == Region.amarillo ? const Color(0xFF4A3500) : Colors.white;
+    return region == Region.amarillo || region == Region.blanco
+        ? const Color(0xFF4A3500)
+        : Colors.white;
   }
 }
 

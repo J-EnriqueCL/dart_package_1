@@ -20,6 +20,10 @@ class PartidaBloc extends ChangeNotifier {
 
   List<Celda> get matriz => _controlador.matriz;
   List<Area> get areas => _controlador.areas;
+
+  /// Regiones que existen en el mapa actual.
+  List<Region> get regiones =>
+      Region.values.where((region) => totalAreas(region) > 0).toList();
   int get turno => _turno;
   String get mensaje => _mensaje;
   List<int>? get dados => _dados;

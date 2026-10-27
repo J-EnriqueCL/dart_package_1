@@ -1,6 +1,7 @@
 import 'package:dart_package_1/main.dart';
 import 'package:dart_package_1/pantalla_numeros_iniciales.dart';
 import 'package:dart_package_1/pantalla_partida.dart';
+import 'package:dart_package_1/pantalla_seleccion_mapa.dart';
 import 'package:dart_package_1/widgets/celda_gema.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
@@ -35,6 +36,9 @@ void main() {
         await fijarPantalla(tester);
         await tester.pumpWidget(const AplicacionBrilliant());
         await tester.pumpAndSettle();
+
+        expect(find.byType(PantallaSeleccionMapa), findsOneWidget);
+        await tocar(tester, find.byKey(const Key('mapa_0')));
 
         expect(find.byType(PantallaNumerosIniciales), findsOneWidget);
         expect(find.text('BRILLIANT'), findsOneWidget);

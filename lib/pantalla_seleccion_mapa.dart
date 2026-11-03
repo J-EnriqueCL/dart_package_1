@@ -2,15 +2,27 @@ import 'dart:math';
 
 import 'package:flutter/material.dart';
 
+import 'auth/cliente_auth.dart';
+import 'auth/pantalla_acceso.dart';
 import 'dart_package_1.dart';
 import 'pantalla_numeros_iniciales.dart';
 import 'tema.dart';
 
 class PantallaSeleccionMapa extends StatelessWidget {
-  const PantallaSeleccionMapa({super.key, this.azar});
+  const PantallaSeleccionMapa({super.key, this.azar, this.auth});
 
   /// Fuente de azar que se pasa a la partida; si es null se usa `Random()`.
   final Random? azar;
+
+  /// Sesión actual; si es null no se muestra el menú de cuenta.
+  final ClienteAuth? auth;
+
+  Future<void> _borrarCuenta(BuildContext context, ClienteAuth auth) async {
+    final mensajes = ScaffoldMessenger.of(context);
+    if (await confirmarBorrarCuenta(context, auth)) {
+      mensajes.showSnackBar(const SnackBar(content: Text('Cuenta borrada')));
+    }
+  }
 
   void _elegir(BuildContext context, MapaOficial mapa) {
     Navigator.of(context).push(
@@ -22,7 +34,40 @@ class PantallaSeleccionMapa extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final auth = this.auth;
     return Scaffold(
+      appBar: auth == null
+          ? null
+          : AppBar(
+              backgroundColor: Colors.transparent,
+              actions: [
+                PopupMenuButton<String>(
+                  key: const Key('menu_cuenta'),
+                  icon: const Icon(Icons.account_circle_outlined),
+                  tooltip: auth.correo,
+                  onSelected: (v) => v == 'salir'
+                      ? auth.cerrarSesion()
+                      : _borrarCuenta(context, auth),
+                  itemBuilder: (_) => [
+                    PopupMenuItem(
+                      enabled: false,
+                      child: Text(auth.correo ?? ''),
+                    ),
+                    const PopupMenuItem(
+                      key: Key('menu_salir'),
+                      value: 'salir',
+                      child: Text('Cerrar sesión'),
+                    ),
+                    const PopupMenuItem(
+                      key: Key('menu_borrar'),
+                      value: 'borrar',
+                      child: Text('Borrar cuenta'),
+                    ),
+                  ],
+                ),
+              ],
+            ),
+      extendBodyBehindAppBar: true,
       body: FondoJuego(
         child: SafeArea(
           child: Center(

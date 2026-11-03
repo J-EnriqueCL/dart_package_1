@@ -1,16 +1,22 @@
 import 'package:flutter/material.dart';
 
+import 'auth/cliente_auth.dart';
+import 'auth/pantalla_acceso.dart';
 import 'pantalla_seleccion_mapa.dart';
 
 void main() {
-  runApp(const AplicacionBrilliant());
+  runApp(AplicacionBrilliant(auth: ClienteAuth()));
 }
 
 class AplicacionBrilliant extends StatelessWidget {
-  const AplicacionBrilliant({super.key});
+  /// Si [auth] es null no se pide cuenta y se entra directo al juego.
+  const AplicacionBrilliant({super.key, this.auth});
+
+  final ClienteAuth? auth;
 
   @override
   Widget build(BuildContext context) {
+    final auth = this.auth;
     return MaterialApp(
       debugShowCheckedModeBanner: false,
       title: 'Brilliant',
@@ -19,7 +25,14 @@ class AplicacionBrilliant extends StatelessWidget {
         brightness: Brightness.dark,
         colorSchemeSeed: Colors.deepPurple,
       ),
-      home: const PantallaSeleccionMapa(),
+      home: auth == null
+          ? const PantallaSeleccionMapa()
+          : ListenableBuilder(
+              listenable: auth,
+              builder: (context, _) => auth.haySesion
+                  ? PantallaSeleccionMapa(auth: auth)
+                  : PantallaAcceso(auth: auth),
+            ),
     );
   }
 }

@@ -388,6 +388,15 @@ class ClienteMultijugador extends ChangeNotifier {
       _accion({'tipo': MsgCliente.elegirMapa, 'mapa': mapa});
   bool expulsar(String id) => _accion({'tipo': MsgCliente.expulsar, 'id': id});
   bool empezar() => _accion({'tipo': MsgCliente.empezar});
+  bool colocarInicial(int indice, int numero) => _accion({
+    'tipo': MsgCliente.colocarInicial,
+    'indice': indice,
+    'numero': numero,
+  });
+  bool quitarInicial(int indice) =>
+      _accion({'tipo': MsgCliente.quitarInicial, 'indice': indice});
+  bool confirmarDistribucion() =>
+      _accion({'tipo': MsgCliente.confirmarDistribucion});
   bool tirar() => _accion({'tipo': MsgCliente.tirar});
   bool colocar(int indice, int ancla) =>
       _accion({'tipo': MsgCliente.colocar, 'indice': indice, 'ancla': ancla});

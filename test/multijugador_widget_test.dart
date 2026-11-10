@@ -276,6 +276,321 @@ void main() {
     });
   });
 
+  group('Preparación', () {
+    final ini = mapasOficiales.first.indicesIniciales;
+
+    EstadoSala preparando({
+      Map<int, int> colocados = const {},
+      EstadoJugador yo = EstadoJugador.preparando,
+      EstadoJugador rival = EstadoJugador.preparando,
+      List<JugadorSala>? jugadores,
+    }) {
+      final t = List<int?>.filled(49, null);
+      colocados.forEach((posicion, n) => t[ini[posicion]] = n);
+      return estadoSala(
+        fase: FaseSala.preparacion,
+        tablero: t,
+        jugadores:
+            jugadores ??
+            [jugadorSala('a', estado: yo), jugadorSala('b', estado: rival)],
+      );
+    }
+
+    Map<String, Object?>? ultimo(String tipo) => servidor.ultima.ultimoDe(tipo);
+
+    prueba('muestra números, progreso y estados; confirmar deshabilitado', (
+      tester,
+    ) async {
+      await abrirCon(tester, preparando());
+      for (var n = 1; n <= 6; n++) {
+        expect(find.byKey(Key('numero_$n')), findsOneWidget);
+        expect(habilitado(tester, 'numero_$n'), isTrue);
+      }
+      expect(find.text('Números colocados: 0/6'), findsOneWidget);
+      expect(habilitado(tester, 'boton_confirmar_distribucion'), isFalse);
+      expect(
+        tester.widget<Text>(find.byKey(const Key('estado_a'))).data,
+        'Colocando números',
+      );
+      for (var k = 0; k < 6; k++) {
+        expect(find.byKey(Key('inicial_$k')), findsOneWidget);
+      }
+    });
+
+    prueba('elegir un número y tocar una posición envía la colocación', (
+      tester,
+    ) async {
+      await abrirCon(tester, preparando());
+      await tap(tester, find.byKey(const Key('numero_4')));
+      await tap(tester, find.byKey(const Key('inicial_2')));
+      final msg = ultimo(MsgCliente.colocarInicial)!;
+      expect(msg['indice'], ini[2]);
+      expect(msg['numero'], 4);
+
+      // El servidor confirma: avanza el progreso y el 4 queda usado.
+      await recibir(tester, preparando(colocados: {2: 4}));
+      expect(find.text('Números colocados: 1/6'), findsOneWidget);
+      expect(habilitado(tester, 'numero_4'), isFalse);
+      expect(habilitado(tester, 'numero_5'), isTrue);
+      expect(celda(tester, 0).valor, isNull);
+    });
+
+    prueba(
+      'tocar una posición sin elegir número, o una casilla normal, no envía nada',
+      (tester) async {
+        await abrirCon(tester, preparando());
+        await tap(tester, find.byKey(const Key('inicial_0')));
+        await tap(tester, find.byKey(const Key('numero_1')));
+        await tap(tester, find.byKey(const Key('celda_0')));
+        expect(
+          servidor.ultima.tiposEnviados,
+          isNot(contains(MsgCliente.colocarInicial)),
+        );
+      },
+    );
+
+    prueba('tocar un número colocado lo retira y lo devuelve a disponibles', (
+      tester,
+    ) async {
+      await abrirCon(tester, preparando(colocados: {0: 3, 1: 6}));
+      expect(find.text('Números colocados: 2/6'), findsOneWidget);
+      await tap(tester, find.byKey(const Key('inicial_0')));
+      expect(ultimo(MsgCliente.quitarInicial)!['indice'], ini[0]);
+      await recibir(tester, preparando(colocados: {1: 6}));
+      expect(find.text('Números colocados: 1/6'), findsOneWidget);
+      expect(habilitado(tester, 'numero_3'), isTrue);
+    });
+
+    prueba('confirmar solo se habilita con los seis números y se envía', (
+      tester,
+    ) async {
+      await abrirCon(
+        tester,
+        preparando(colocados: {0: 1, 1: 2, 2: 3, 3: 4, 4: 5}),
+      );
+      expect(habilitado(tester, 'boton_confirmar_distribucion'), isFalse);
+      await recibir(
+        tester,
+        preparando(colocados: {0: 1, 1: 2, 2: 3, 3: 4, 4: 5, 5: 6}),
+      );
+      expect(find.text('Números colocados: 6/6'), findsOneWidget);
+      expect(habilitado(tester, 'boton_confirmar_distribucion'), isTrue);
+      await tap(tester, find.byKey(const Key('boton_confirmar_distribucion')));
+      expect(ultimo(MsgCliente.confirmarDistribucion), isNotNull);
+    });
+
+    prueba('tras confirmar se bloquea y se espera a los demás', (tester) async {
+      final todos = {0: 1, 1: 2, 2: 3, 3: 4, 4: 5, 5: 6};
+      await abrirCon(
+        tester,
+        preparando(colocados: todos, yo: EstadoJugador.listo),
+      );
+      expect(find.text('Esperando a los demás jugadores'), findsOneWidget);
+      expect(
+        find.byKey(const Key('boton_confirmar_distribucion')),
+        findsNothing,
+      );
+      expect(find.byKey(const Key('numero_1')), findsNothing);
+      expect(find.text('Faltan por confirmar: B'), findsOneWidget);
+      expect(
+        tester.widget<Text>(find.byKey(const Key('estado_a'))).data,
+        'Listo',
+      );
+      expect(
+        tester.widget<Text>(find.byKey(const Key('estado_b'))).data,
+        'Colocando números',
+      );
+      // Ya no se puede modificar: tocar una posición no envía nada.
+      await tap(tester, find.byKey(const Key('inicial_0')));
+      expect(
+        servidor.ultima.tiposEnviados,
+        isNot(contains(MsgCliente.quitarInicial)),
+      );
+    });
+
+    prueba('un número elegido se descarta si ya no está disponible', (
+      tester,
+    ) async {
+      await abrirCon(tester, preparando());
+      await tap(tester, find.byKey(const Key('numero_2')));
+      await recibir(tester, preparando(colocados: {0: 2}));
+      await tap(tester, find.byKey(const Key('inicial_1')));
+      expect(
+        servidor.ultima.tiposEnviados,
+        isNot(contains(MsgCliente.colocarInicial)),
+      );
+    });
+
+    prueba('puntos provisionales según el tablero propio, sin acumular', (
+      tester,
+    ) async {
+      // Nivel 3: dos áreas blancas de una casilla iniciales (4 + 4).
+      final ini3 = mapasOficiales[2].indicesIniciales;
+      List<int?> tab(int n) {
+        final t = List<int?>.filled(49, null);
+        for (var k = 0; k < n; k++) {
+          t[ini3[k]] = k + 1;
+        }
+        return t;
+      }
+
+      EstadoSala e(int n, {EstadoJugador yo = EstadoJugador.preparando}) =>
+          estadoSala(
+            fase: FaseSala.preparacion,
+            mapa: 2,
+            tablero: tab(n),
+            jugadores: [
+              jugadorSala('a', estado: yo),
+              jugadorSala('b'),
+            ],
+          );
+      await abrirCon(tester, e(0));
+      Text pts() => tester.widget<Text>(
+        find.descendant(
+          of: find.byKey(const Key('puntos_provisionales')),
+          matching: find.byType(Text),
+        ),
+      );
+      expect(pts().data, '0 pts (provisional)');
+      await recibir(tester, e(6));
+      expect(pts().data, '8 pts (provisional)');
+      // Quitar y volver a poner no suma de más: el valor sale del tablero.
+      await recibir(tester, e(5));
+      await recibir(tester, e(6));
+      expect(pts().data, '8 pts (provisional)');
+      await recibir(tester, e(6, yo: EstadoJugador.listo));
+      expect(pts().data, '8 pts');
+    });
+
+    prueba('la reconexión recupera borrador y confirmación', (tester) async {
+      final borrador = preparando(colocados: {0: 5, 3: 1});
+      await abrirCon(tester, borrador);
+      servidor.ultima.servidorCierra();
+      await bombear(tester, 100);
+      expect(find.byKey(const Key('banda_reconectando')), findsOneWidget);
+      expect(find.text('Números colocados: 2/6'), findsOneWidget);
+      // El servidor devuelve el mismo borrador al reconectar.
+      await recibir(tester, borrador);
+      expect(find.byKey(const Key('banda_reconectando')), findsNothing);
+      expect(find.text('Números colocados: 2/6'), findsOneWidget);
+      expect(habilitado(tester, 'numero_5'), isFalse);
+      // Si ya había confirmado, sigue confirmado.
+      await recibir(
+        tester,
+        preparando(
+          colocados: {0: 1, 1: 2, 2: 3, 3: 4, 4: 5, 5: 6},
+          yo: EstadoJugador.listo,
+        ),
+      );
+      expect(find.text('Esperando a los demás jugadores'), findsOneWidget);
+    });
+
+    prueba('rival desconectado, rendido o abandonado se distingue', (
+      tester,
+    ) async {
+      await abrirCon(
+        tester,
+        preparando(
+          jugadores: [
+            jugadorSala('a'),
+            jugadorSala(
+              'b',
+              estado: EstadoJugador.listo,
+              conectado: false,
+              gracia: 30,
+            ),
+            jugadorSala('c', estado: EstadoJugador.concedio),
+            jugadorSala('d', estado: EstadoJugador.abandono),
+          ],
+        ),
+      );
+      String texto(String id) =>
+          tester.widget<Text>(find.byKey(Key('estado_$id'))).data!;
+      expect(texto('b'), 'Listo · Sin conexión 30s');
+      expect(texto('c'), 'Rendido');
+      expect(texto('d'), 'Abandonó');
+    });
+
+    prueba('quien se rindió en la preparación solo mira', (tester) async {
+      await abrirCon(tester, preparando(yo: EstadoJugador.concedio));
+      expect(
+        find.text('Ya no participas. Puedes seguir mirando.'),
+        findsOneWidget,
+      );
+      expect(
+        find.byKey(const Key('boton_confirmar_distribucion')),
+        findsNothing,
+      );
+      expect(habilitado(tester, 'numero_1'), isFalse);
+    });
+
+    prueba('salir en plena preparación pide confirmar (cuenta como rendirse)', (
+      tester,
+    ) async {
+      await abrirCon(tester, preparando());
+      await tester.tap(find.byKey(const Key('boton_volver')));
+      await bombear(tester, 350);
+      expect(find.text('¿Rendirte y salir?'), findsOneWidget);
+    });
+  });
+
+  group('Estados en partida', () {
+    EstadoSala conEstados(List<JugadorSala> js, {String yo = 'a'}) =>
+        estadoSala(yo: yo, fase: FaseSala.jugando, turnoDe: 'b', jugadores: js);
+
+    prueba('terminado, rendido, abandonó y sin conexión se distinguen', (
+      tester,
+    ) async {
+      await abrirCon(
+        tester,
+        conEstados([
+          jugadorSala('a'),
+          jugadorSala('b'),
+          jugadorSala('c', estado: EstadoJugador.terminado, puntos: 30),
+          jugadorSala(
+            'd',
+            estado: EstadoJugador.terminado,
+            conectado: false,
+            gracia: 20,
+          ),
+        ]),
+      );
+      String texto(String id) =>
+          tester.widget<Text>(find.byKey(Key('estado_$id'))).data!;
+      expect(texto('c'), 'Terminado');
+      expect(texto('d'), 'Terminado · Sin conexión 20s');
+      expect(tester.widget<Text>(find.byKey(const Key('puntos_c'))).data, '30');
+
+      await recibir(
+        tester,
+        conEstados([
+          jugadorSala('a'),
+          jugadorSala('b'),
+          jugadorSala('c', estado: EstadoJugador.concedio, puntos: 12),
+          jugadorSala('d', estado: EstadoJugador.abandono, puntos: 8),
+        ]),
+      );
+      expect(texto('c'), 'Rendido');
+      expect(texto('d'), 'Abandonó');
+      expect(tester.widget<Text>(find.byKey(const Key('puntos_c'))).data, '12');
+    });
+
+    prueba('quien terminó su tablero lo ve y no puede actuar', (tester) async {
+      await abrirCon(
+        tester,
+        conEstados([
+          jugadorSala('a', estado: EstadoJugador.terminado, puntos: 20),
+          jugadorSala('b'),
+        ]),
+      );
+      expect(
+        find.text('Terminaste tu tablero. Esperando a que acaben los demás.'),
+        findsOneWidget,
+      );
+      expect(habilitado(tester, 'boton_tirar_dados'), isFalse);
+    });
+  });
+
   group('Partida', () {
     EstadoSala jugando({
       String yo = 'a',
@@ -413,7 +728,8 @@ void main() {
         ),
       );
       final texto = tester.widget<Text>(find.byKey(const Key('estado_b')));
-      expect(texto.data, startsWith('Sin conexión'));
+      expect(texto.data, contains('Sin conexión 40s'));
+      expect(texto.data, startsWith('Turno'), reason: 'conserva su estado');
       expect(texto.data, contains('s'));
     });
 
@@ -430,7 +746,7 @@ void main() {
       );
       expect(
         tester.widget<Text>(find.byKey(const Key('estado_b'))).data,
-        'Se rindió',
+        'Rendido',
       );
     });
 
@@ -505,7 +821,7 @@ void main() {
     EstadoSala terminada({
       String yo = 'a',
       required List<String> ganadores,
-      MotivoFin motivo = MotivoFin.tableroCompleto,
+      MotivoFin motivo = MotivoFin.todosTerminaron,
       List<JugadorSala>? jugadores,
     }) => estadoSala(
       yo: yo,
@@ -558,7 +874,7 @@ void main() {
         ),
       );
       expect(find.text('¡Ganaste!'), findsOneWidget);
-      expect(find.text('se rindió  '), findsOneWidget);
+      expect(find.text('Rendido  '), findsOneWidget);
     });
 
     prueba('quien se rindió ve "Te rendiste"', (tester) async {
@@ -624,6 +940,38 @@ void main() {
   });
 
   group('Pantallas pequeñas', () {
+    prueba('la preparación cabe sin desbordes en 320x568', (tester) async {
+      await abrirCon(tester, null);
+      await tester.binding.setSurfaceSize(const Size(320, 568));
+      addTearDown(() => tester.binding.setSurfaceSize(null));
+      final ini = mapasOficiales.first.indicesIniciales;
+      final t = List<int?>.filled(49, null)..[ini[0]] = 2;
+      await recibir(
+        tester,
+        estadoSala(
+          fase: FaseSala.preparacion,
+          tablero: t,
+          jugadores: [
+            for (final id in ['a', 'b', 'c', 'd'])
+              jugadorSala(
+                id,
+                conectado: id != 'c',
+                gracia: id == 'c' ? 45 : null,
+              ),
+          ],
+        ),
+      );
+      expect(find.byKey(const Key('numero_6')), findsOneWidget);
+      expect(
+        find.byKey(const Key('boton_confirmar_distribucion')),
+        findsOneWidget,
+      );
+      final celdaRect = tester.getRect(find.byKey(const Key('inicial_0')));
+      expect(celdaRect.width, greaterThan(24));
+      final r = tester.getRect(find.byKey(const Key('numero_1')));
+      expect(r.height, greaterThanOrEqualTo(40));
+    });
+
     const tamanos = [Size(320, 568), Size(360, 640)];
     final cuatro = [
       for (final id in ['a', 'b', 'c', 'd'])
@@ -698,7 +1046,7 @@ void main() {
             mensaje: 'Tablero completo. Gana A.',
             resultado: const ResultadoPartida(
               ganadores: ['a'],
-              motivo: MotivoFin.tableroCompleto,
+              motivo: MotivoFin.todosTerminaron,
             ),
           ),
         );

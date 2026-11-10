@@ -199,6 +199,19 @@ class ControladorPartida {
     _calcularAreas();
   }
 
+  /// Tablero sin exigir que los seis iniciales estén completos: sirve para
+  /// mostrar una preparación a medias. Las reglas de la partida usan
+  /// [establecerValoresIniciales].
+  void establecerTableroProvisional(List<Celda> celdas) {
+    if (celdas.length != filas * columnas) {
+      throw ArgumentError('El tablero debe tener exactamente 49 celdas.');
+    }
+
+    _matriz = List<Celda>.of(celdas);
+
+    _calcularAreas();
+  }
+
   List<int> _vecinosParaFormarArea(int indice) {
     final vecinos = <int>{...vecinosDe(indice)};
 

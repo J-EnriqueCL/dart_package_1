@@ -120,8 +120,31 @@ void main() {
       await a.estado((e) => e.jugadores.length == 2);
 
       a.enviar({'tipo': MsgCliente.empezar});
+      final prep = await b.estado((e) => e.fase == FaseSala.preparacion);
+      expect(prep.tablero.where((v) => v != null), isEmpty);
+
+      // Cada uno reparte el 1..6 a su manera y confirma.
+      final ini = prep.mapaOficial.indicesIniciales;
+      for (var k = 0; k < 6; k++) {
+        a.enviar({
+          'tipo': MsgCliente.colocarInicial,
+          'indice': ini[k],
+          'numero': k + 1,
+        });
+        b.enviar({
+          'tipo': MsgCliente.colocarInicial,
+          'indice': ini[k],
+          'numero': 6 - k,
+        });
+      }
+      a.enviar({'tipo': MsgCliente.confirmarDistribucion});
+      await b.estado(
+        (e) => e.jugador(e.anfitrion)!.estado == EstadoJugador.listo,
+      );
+      b.enviar({'tipo': MsgCliente.confirmarDistribucion});
       final jugando = await b.estado((e) => e.fase == FaseSala.jugando);
       expect(jugando.tablero.where((v) => v != null), hasLength(6));
+      expect([for (final i in ini) jugando.tablero[i]], [6, 5, 4, 3, 2, 1]);
 
       // Beto pierde la conexión: Ana lo ve caído.
       await b.cerrar();

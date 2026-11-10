@@ -9,6 +9,7 @@ import '../widgets/confirmar.dart';
 import 'cliente_multijugador.dart';
 import 'vista_lobby.dart';
 import 'vista_partida_online.dart';
+import 'vista_preparacion.dart';
 
 /// Pantalla única del modo en línea: según el estado muestra la entrada (crear
 /// o unirse), el lobby o la partida. Al ser una sola ruta, los cortes de
@@ -69,12 +70,13 @@ class _PantallaMultijugadorState extends State<PantallaMultijugador>
       ..showSnackBar(SnackBar(content: Text(texto)));
   }
 
-  /// Hay una partida en marcha en la que el jugador aún participa.
+  /// Hay una partida (o su preparación) en marcha en la que el jugador aún
+  /// participa: salir cuenta como rendirse.
   bool get _jugandoActivo {
     final s = _cliente.sala;
     return s != null &&
-        s.fase == FaseSala.jugando &&
-        (s.miJugador?.activo ?? false);
+        (s.fase == FaseSala.jugando || s.fase == FaseSala.preparacion) &&
+        (s.miJugador?.participa ?? false);
   }
 
   Future<void> _alIntentarSalir(bool didPop) async {
@@ -143,6 +145,9 @@ class _PantallaMultijugadorState extends State<PantallaMultijugador>
     }
     if (sala.fase == FaseSala.lobby) {
       return VistaLobby(cliente: _cliente, sala: sala);
+    }
+    if (sala.fase == FaseSala.preparacion) {
+      return VistaPreparacion(cliente: _cliente, sala: sala);
     }
     return VistaPartidaOnline(cliente: _cliente, sala: sala);
   }
@@ -319,7 +324,7 @@ class _VistaEntradaState extends State<_VistaEntrada> {
         ),
         const SizedBox(height: 8),
         const Text(
-          'Juega por turnos en el mismo tablero contra tus amigos.',
+          'Juega por turnos contra tus amigos, cada uno en su propio tablero.',
           textAlign: TextAlign.center,
           style: TextStyle(color: Colors.white70),
         ),

@@ -1,5 +1,6 @@
 import 'dart_package_1_base.dart';
 import 'mapas.dart';
+import 'preparacion.dart';
 
 /// Nombres de los mensajes del protocolo WebSocket (`/ws`).
 ///
@@ -26,6 +27,17 @@ abstract final class MsgCliente {
   /// En el lobby sale de la sala; en partida equivale a rendirse y salir.
   static const salirSala = 'salir_sala';
   static const tirar = 'tirar';
+
+  /// `{indice, numero}`: pone un número del 1 al 6 en una de las seis
+  /// posiciones iniciales de tu tablero (solo en la preparación).
+  static const colocarInicial = 'colocar_inicial';
+
+  /// `{indice}`: retira el número de una posición inicial (solo antes de
+  /// confirmar).
+  static const quitarInicial = 'quitar_inicial';
+
+  /// Confirma la distribución inicial; después ya no se puede cambiar.
+  static const confirmarDistribucion = 'confirmar_distribucion';
 
   /// `{indice, ancla}`: `ancla` es la posición (0 o 1) del dado ancla.
   static const colocar = 'colocar';
@@ -64,6 +76,9 @@ abstract final class CodigoError {
 
 enum FaseSala {
   lobby,
+
+  /// Cada jugador reparte el 1..6 en las posiciones iniciales de su tablero.
+  preparacion,
   jugando,
   terminada;
 
@@ -73,9 +88,26 @@ enum FaseSala {
   );
 }
 
+/// Situación de un jugador en la partida. La conexión temporal es aparte
+/// ([JugadorSala.conectado]): perder la red no cambia este estado.
 enum EstadoJugador {
-  activo,
+  /// Preparación: todavía coloca sus números iniciales.
+  preparando,
+
+  /// Preparación: distribución confirmada, espera a los demás.
+  listo,
+
+  /// Partida: tiene jugadas posibles.
+  jugando,
+
+  /// Partida: llenó su tablero o ya no existe ninguna jugada legal. Conserva
+  /// sus puntos y sigue siendo candidato a ganar.
+  terminado,
+
+  /// Se rindió: conserva su puntuación pero no puede ganar.
   concedio,
+
+  /// Se fue o no volvió: conserva su puntuación pero no puede ganar.
   abandono;
 
   static EstadoJugador desde(Object? v) => EstadoJugador.values.firstWhere(
@@ -85,13 +117,15 @@ enum EstadoJugador {
 }
 
 enum MotivoFin {
-  tableroCompleto,
-  sinMovimientos,
+  /// Todos los jugadores que no se rindieron ni abandonaron terminaron su
+  /// tablero: gana quien tenga más puntos.
+  todosTerminaron,
 
-  /// Solo queda un jugador porque los demás se rindieron.
+  /// Queda como máximo un jugador porque los demás se rindieron.
   rendicion,
 
-  /// Solo queda un jugador porque los demás se desconectaron o no jugaron.
+  /// Queda como máximo un jugador porque los demás se desconectaron o no
+  /// jugaron.
   abandono;
 
   static MotivoFin desde(Object? v) => MotivoFin.values.firstWhere(
@@ -106,7 +140,7 @@ class JugadorSala {
     required this.nombre,
     required this.conectado,
     this.puntos = 0,
-    this.estado = EstadoJugador.activo,
+    this.estado = EstadoJugador.preparando,
     this.graciaRestante,
   });
 
@@ -119,7 +153,9 @@ class JugadorSala {
   /// Segundos que le quedan para reconectarse antes de perder su sitio.
   final int? graciaRestante;
 
-  bool get activo => estado == EstadoJugador.activo;
+  /// Sigue en la partida y puede ganar (no se rindió ni abandonó).
+  bool get participa =>
+      estado != EstadoJugador.concedio && estado != EstadoJugador.abandono;
 
   Map<String, Object?> toJson() => {
     'id': id,
@@ -152,11 +188,10 @@ class ResultadoPartida {
     'motivo': motivo.name,
   };
 
-  factory ResultadoPartida.fromJson(Map<String, Object?> j) =>
-      ResultadoPartida(
-        ganadores: (j['ganadores'] as List).cast<String>(),
-        motivo: MotivoFin.desde(j['motivo']),
-      );
+  factory ResultadoPartida.fromJson(Map<String, Object?> j) => ResultadoPartida(
+    ganadores: (j['ganadores'] as List).cast<String>(),
+    motivo: MotivoFin.desde(j['motivo']),
+  );
 }
 
 /// Foto de una sala tal como la ve un jugador concreto ([yo]).
@@ -195,7 +230,9 @@ class EstadoSala {
   /// Dados tirados en el turno actual, o null si aún no se tiraron.
   final List<int>? dados;
 
-  /// Valor de cada una de las 49 casillas (null = vacía). Vacío en el lobby.
+  /// Tablero **propio** de quien recibe el estado: valor de cada una de las 49
+  /// casillas (null = vacía). Vacío en el lobby. Los tableros rivales no se
+  /// envían; de ellos solo se ve el marcador.
   final List<int?> tablero;
 
   /// Texto con lo último que pasó (para mostrar a todos).
@@ -218,7 +255,14 @@ class EstadoSala {
 
   JugadorSala? get miJugador => jugador(yo);
 
-  /// Controlador con el tablero actual, para calcular destinos y áreas.
+  /// Números del 1 al 6 que aún no están colocados en mi tablero.
+  List<int> get numerosPorColocar => numerosPendientes(
+    mapaOficial,
+    tablero.isEmpty ? List<int?>.filled(49, null) : tablero,
+  );
+
+  /// Controlador con mi tablero actual, para calcular destinos y áreas. Admite
+  /// una preparación incompleta.
   ControladorPartida crearControlador() {
     final celdas = mapaOficial.crearTablero();
     for (var i = 0; i < celdas.length && i < tablero.length; i++) {
@@ -226,7 +270,7 @@ class EstadoSala {
       if (v != null) celdas[i] = celdas[i].copiarCon(valor: v);
     }
     return ControladorPartida(gruposConectados: mapaOficial.gruposConectados)
-      ..establecerValoresIniciales(celdas);
+      ..establecerTableroProvisional(celdas);
   }
 
   Map<String, Object?> toJson() => {

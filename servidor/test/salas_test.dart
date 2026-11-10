@@ -33,6 +33,24 @@ class Jugador {
       enviar({'tipo': MsgCliente.unirse, 'codigo': codigo});
   void accion(String tipo) => enviar({'tipo': tipo});
 
+  /// Pone el 1..6 (o [orden]) en las posiciones iniciales de mi tablero.
+  void colocarIniciales({List<int>? orden}) {
+    final ini = estado.mapaOficial.indicesIniciales;
+    final numeros = orden ?? const [1, 2, 3, 4, 5, 6];
+    for (var k = 0; k < ini.length; k++) {
+      enviar({
+        'tipo': MsgCliente.colocarInicial,
+        'indice': ini[k],
+        'numero': numeros[k],
+      });
+    }
+  }
+
+  void distribuir({List<int>? orden}) {
+    colocarIniciales(orden: orden);
+    accion(MsgCliente.confirmarDistribucion);
+  }
+
   void caer() => g.desconectar(id, canal);
 
   void volver() {
@@ -72,6 +90,7 @@ void main() {
     Duration graciaLobby = _larga,
     int max = 4,
     int fallos = 8,
+    DateTime Function()? ahora,
   }) => g = GestorSalas(
     config: ConfigSalas(
       tiempoTurno: turno,
@@ -81,6 +100,7 @@ void main() {
       maxFallosUnirse: fallos,
     ),
     azar: Random(7),
+    ahora: ahora,
   );
 
   setUp(() => nuevo());
@@ -96,9 +116,27 @@ void main() {
     return (ana, beto, codigo);
   }
 
-  (Jugador, Jugador) parejaJugando() {
+  /// Pareja en la fase de preparación (el anfitrión ya pulsó empezar).
+  (Jugador, Jugador) parejaPreparando() {
     final (ana, beto, _) = parejaEnLobby();
     ana.accion(MsgCliente.empezar);
+    return (ana, beto);
+  }
+
+  (Jugador, Jugador) otraParejaPreparando() {
+    final ana = Jugador(g, 'ana2');
+    final beto = Jugador(g, 'beto2');
+    ana.crearSala();
+    beto.unirse(ana.estado.codigo);
+    ana.accion(MsgCliente.empezar);
+    return (ana, beto);
+  }
+
+  /// Pareja ya jugando: ambos confirmaron su distribución.
+  (Jugador, Jugador) parejaJugando() {
+    final (ana, beto) = parejaPreparando();
+    ana.distribuir();
+    beto.distribuir(orden: const [6, 5, 4, 3, 2, 1]);
     return (ana, beto);
   }
 
@@ -265,14 +303,20 @@ void main() {
   });
 
   group('Partida', () {
-    test('empezar reparte tablero y turno; solo juega quien toca', () {
+    test('al confirmar todos hay turno y cada uno ve su propio tablero', () {
       final (ana, beto) = parejaJugando();
       final e = ana.estado;
       expect(e.fase, FaseSala.jugando);
       expect(e.tablero.where((v) => v != null), hasLength(6));
       expect(e.turnoDe, anyOf(ana.id, beto.id));
       expect(e.segundosTurno, isNotNull);
-      expect(beto.estado.tablero, e.tablero);
+      final ini = e.mapaOficial.indicesIniciales;
+      expect([for (final i in ini) e.tablero[i]], [1, 2, 3, 4, 5, 6]);
+      expect(
+        [for (final i in ini) beto.estado.tablero[i]],
+        [6, 5, 4, 3, 2, 1],
+        reason: 'Beto repartió distinto y solo ve el suyo',
+      );
 
       final otro = e.turnoDe == ana.id ? beto : ana;
       otro.accion(MsgCliente.tirar);
@@ -383,6 +427,9 @@ void main() {
       final (ana, beto, codigo) = parejaEnLobby();
       final caro = Jugador(g, 'caro')..unirse(codigo);
       ana.accion(MsgCliente.empezar);
+      for (final j in [ana, beto, caro]) {
+        j.distribuir();
+      }
       caro.accion(MsgCliente.conceder);
       expect(ana.estado.fase, FaseSala.jugando);
       expect(ana.estado.turnoDe, isNot(caro.id));
@@ -395,10 +442,252 @@ void main() {
       final (ana, beto, codigo) = parejaEnLobby();
       final caro = Jugador(g, 'caro')..unirse(codigo);
       ana.accion(MsgCliente.empezar);
+      for (final j in [ana, beto, caro]) {
+        j.distribuir();
+      }
       ana.accion(MsgCliente.conceder);
       expect(beto.estado.anfitrion, isNot(ana.id));
-      expect(beto.estado.jugador(beto.estado.anfitrion)!.activo, isTrue);
+      expect(beto.estado.jugador(beto.estado.anfitrion)!.participa, isTrue);
       expect(caro.estado.fase, FaseSala.jugando);
+    });
+  });
+
+  group('Preparación', () {
+    test('empezar abre la preparación: tablero propio vacío y sin turno', () {
+      final (ana, beto) = parejaPreparando();
+      for (final j in [ana, beto]) {
+        final e = j.estado;
+        expect(e.fase, FaseSala.preparacion);
+        expect(e.tablero, hasLength(49));
+        expect(e.tablero.where((v) => v != null), isEmpty);
+        expect(e.numerosPorColocar, [1, 2, 3, 4, 5, 6]);
+        expect(e.turnoDe, isNull);
+        expect(e.segundosTurno, isNull);
+        expect(e.dados, isNull);
+        for (final x in e.jugadores) {
+          expect(x.estado, EstadoJugador.preparando);
+        }
+      }
+    });
+
+    test('colocar, retirar y confirmar por mensajes; cada uno ve lo suyo', () {
+      final (ana, beto) = parejaPreparando();
+      final ini = ana.estado.mapaOficial.indicesIniciales;
+      ana.enviar({
+        'tipo': MsgCliente.colocarInicial,
+        'indice': ini[0],
+        'numero': 4,
+      });
+      expect(ana.estado.tablero[ini[0]], 4);
+      expect(ana.estado.numerosPorColocar, [1, 2, 3, 5, 6]);
+      expect(beto.estado.tablero[ini[0]], isNull, reason: 'tablero ajeno');
+      ana.enviar({'tipo': MsgCliente.quitarInicial, 'indice': ini[0]});
+      expect(ana.estado.tablero[ini[0]], isNull);
+      expect(ana.estado.numerosPorColocar, [1, 2, 3, 4, 5, 6]);
+
+      ana.distribuir(orden: const [3, 1, 2, 6, 5, 4]);
+      expect(ana.estado.miJugador!.estado, EstadoJugador.listo);
+      expect(beto.estado.jugador(ana.id)!.estado, EstadoJugador.listo);
+      expect(beto.estado.jugador(beto.id)!.estado, EstadoJugador.preparando);
+      expect(beto.estado.fase, FaseSala.preparacion);
+    });
+
+    test('un mensaje con otro id no toca el tablero de otro jugador', () {
+      final (ana, beto) = parejaPreparando();
+      final ini = ana.estado.mapaOficial.indicesIniciales;
+      ana.enviar({
+        'tipo': MsgCliente.colocarInicial,
+        'indice': ini[0],
+        'numero': 2,
+        'id': beto.id,
+        'yo': beto.id,
+      });
+      expect(ana.estado.tablero[ini[0]], 2);
+      expect(beto.estado.tablero[ini[0]], isNull);
+    });
+
+    test('valores inválidos se rechazan con error y sin cambios', () {
+      final (ana, _) = parejaPreparando();
+      final ini = ana.estado.mapaOficial.indicesIniciales;
+      for (final msg in <Map<String, Object?>>[
+        {'indice': ini[0], 'numero': 0},
+        {'indice': ini[0], 'numero': 7},
+        {'indice': ini[0], 'numero': 2.5},
+        {'indice': ini[0], 'numero': '3'},
+        {'indice': ini[0], 'numero': null},
+        {'indice': ini[0]},
+        {'indice': 0, 'numero': 3},
+        {'indice': 49, 'numero': 3},
+        {'indice': -4, 'numero': 3},
+        {'indice': 1.5, 'numero': 3},
+        {'numero': 3},
+      ]) {
+        ana.enviar({'tipo': MsgCliente.colocarInicial, ...msg});
+        expect(ana.canal.ultimoError, isNotNull, reason: '$msg');
+      }
+      expect(ana.estado.tablero.where((v) => v != null), isEmpty);
+      ana.accion(MsgCliente.confirmarDistribucion);
+      expect(ana.canal.ultimoError, contains('Faltan 6'));
+      expect(ana.estado.miJugador!.estado, EstadoJugador.preparando);
+    });
+
+    test('no valen jugadas normales ni cambios tras confirmar', () {
+      final (ana, beto) = parejaPreparando();
+      ana.distribuir();
+      for (final tipo in [MsgCliente.tirar, MsgCliente.pasar]) {
+        ana.accion(tipo);
+        expect(ana.canal.ultimoError, isNotNull);
+      }
+      ana.enviar({'tipo': MsgCliente.colocar, 'indice': 1, 'ancla': 0});
+      expect(ana.canal.ultimoError, isNotNull);
+      final ini = ana.estado.mapaOficial.indicesIniciales;
+      ana.enviar({'tipo': MsgCliente.quitarInicial, 'indice': ini[0]});
+      expect(ana.canal.ultimoError, contains('confirmada'));
+      expect(ana.estado.tablero[ini[0]], 1);
+      beto.accion(MsgCliente.tirar);
+      expect(beto.canal.ultimoError, isNotNull);
+    });
+
+    test('la partida empieza una vez, con reloj, al confirmar el último', () {
+      final (ana, beto) = parejaPreparando();
+      ana.distribuir();
+      expect(ana.estado.fase, FaseSala.preparacion);
+      expect(ana.estado.segundosTurno, isNull);
+      beto.distribuir();
+      final e = ana.estado;
+      expect(e.fase, FaseSala.jugando);
+      expect(e.segundosTurno, isNotNull);
+      final turno = e.turnoDe;
+      // Mensajes repetidos de confirmación no reinician el turno.
+      ana.accion(MsgCliente.confirmarDistribucion);
+      beto.accion(MsgCliente.confirmarDistribucion);
+      expect(ana.estado.turnoDe, turno);
+      expect(ana.estado.turno, 1);
+      expect(ana.estado.fase, FaseSala.jugando);
+    });
+
+    test('no corre el reloj de turno durante la preparación', () async {
+      nuevo(turno: const Duration(milliseconds: 80));
+      final (ana, beto) = parejaPreparando();
+      ana.distribuir();
+      await esperar(250);
+      expect(ana.estado.fase, FaseSala.preparacion);
+      expect(ana.estado.mensaje, isNot(contains('Se agotó')));
+      beto.distribuir();
+      expect(ana.estado.fase, FaseSala.jugando);
+      expect(ana.estado.segundosTurno, isNotNull);
+    });
+
+    test('reconectar restaura una preparación incompleta', () {
+      final (ana, beto) = parejaPreparando();
+      final ini = beto.estado.mapaOficial.indicesIniciales;
+      beto.enviar({
+        'tipo': MsgCliente.colocarInicial,
+        'indice': ini[2],
+        'numero': 5,
+      });
+      beto.enviar({
+        'tipo': MsgCliente.colocarInicial,
+        'indice': ini[4],
+        'numero': 1,
+      });
+      final antes = beto.estado.tablero;
+      beto.caer();
+      final caido = ana.estado.jugador(beto.id)!;
+      expect(caido.conectado, isFalse);
+      expect(
+        caido.estado,
+        EstadoJugador.preparando,
+        reason: 'sigue participando',
+      );
+      beto.volver();
+      final e = beto.estado;
+      expect(e.fase, FaseSala.preparacion);
+      expect(e.tablero, antes);
+      expect(e.numerosPorColocar, [2, 3, 4, 6]);
+      expect(e.miJugador!.estado, EstadoJugador.preparando);
+    });
+
+    test('reconectar conserva una preparación confirmada', () {
+      final (ana, beto) = parejaPreparando();
+      beto.distribuir(orden: const [2, 4, 6, 1, 3, 5]);
+      final antes = beto.estado.tablero;
+      beto.caer();
+      expect(ana.estado.jugador(beto.id)!.estado, EstadoJugador.listo);
+      beto.volver();
+      expect(beto.estado.tablero, antes);
+      expect(beto.estado.miJugador!.estado, EstadoJugador.listo);
+      // Y sigue sin poder cambiarla ni reenviarla para empezar antes.
+      beto.accion(MsgCliente.confirmarDistribucion);
+      expect(beto.estado.fase, FaseSala.preparacion);
+      ana.distribuir();
+      expect(ana.estado.fase, FaseSala.jugando);
+      expect(beto.estado.tablero, antes);
+    });
+
+    test('rendirse o salir en la preparación deja ganar al único restante', () {
+      final (ana, beto) = parejaPreparando();
+      ana.distribuir();
+      beto.accion(MsgCliente.conceder);
+      final e = ana.estado;
+      expect(e.fase, FaseSala.terminada);
+      expect(e.resultado!.ganadores, [ana.id]);
+      expect(e.resultado!.motivo, MotivoFin.rendicion);
+      expect(e.jugador(beto.id)!.estado, EstadoJugador.concedio);
+
+      final (c, d) = otraParejaPreparando();
+      d.accion(MsgCliente.salirSala);
+      expect(c.estado.fase, FaseSala.terminada);
+      expect(c.estado.resultado!.ganadores, [c.id]);
+    });
+
+    test('con tres, rendirse en la preparación no impide empezar sin él', () {
+      final (ana, beto, codigo) = parejaEnLobby();
+      final caro = Jugador(g, 'caro')..unirse(codigo);
+      ana.accion(MsgCliente.empezar);
+      ana.distribuir();
+      beto.distribuir();
+      expect(ana.estado.fase, FaseSala.preparacion);
+      caro.accion(MsgCliente.conceder);
+      final e = ana.estado;
+      expect(e.fase, FaseSala.jugando);
+      expect(e.jugador(caro.id)!.estado, EstadoJugador.concedio);
+      expect(e.turnoDe, anyOf(ana.id, beto.id));
+    });
+
+    test('no volver a tiempo en la preparación cuenta como abandono', () async {
+      nuevo(graciaPartida: const Duration(milliseconds: 80));
+      final (ana, beto) = parejaPreparando();
+      ana.distribuir();
+      beto.caer();
+      await esperar(200);
+      final e = ana.estado;
+      expect(e.fase, FaseSala.terminada);
+      expect(e.resultado!.motivo, MotivoFin.abandono);
+      expect(e.resultado!.ganadores, [ana.id]);
+      expect(e.jugador(beto.id)!.estado, EstadoJugador.abandono);
+    });
+
+    test('con tres, el que no vuelve no bloquea el inicio', () async {
+      nuevo(graciaPartida: const Duration(milliseconds: 80));
+      final (ana, beto, codigo) = parejaEnLobby();
+      final caro = Jugador(g, 'caro')..unirse(codigo);
+      ana.accion(MsgCliente.empezar);
+      ana.distribuir();
+      beto.distribuir();
+      caro.caer();
+      await esperar(200);
+      final e = ana.estado;
+      expect(e.fase, FaseSala.jugando);
+      expect(e.jugador(caro.id)!.estado, EstadoJugador.abandono);
+    });
+
+    test('quien aún no confirma bloquea el inicio hasta que lo haga', () async {
+      final (ana, beto) = parejaPreparando();
+      ana.distribuir();
+      await esperar(120);
+      expect(ana.estado.fase, FaseSala.preparacion);
+      expect(ana.estado.jugador(beto.id)!.estado, EstadoJugador.preparando);
     });
   });
 
@@ -443,7 +732,7 @@ void main() {
 
     test('en partida el rival ve la desconexión y la vuelta', () {
       final (ana, beto) = parejaJugando();
-      final tablero = ana.estado.tablero;
+      final tablero = beto.estado.tablero;
       beto.caer();
       final caido = ana.estado.jugador(beto.id)!;
       expect(caido.conectado, isFalse);
@@ -496,6 +785,9 @@ void main() {
         final (ana, beto, codigo) = parejaEnLobby();
         final caro = Jugador(g, 'caro')..unirse(codigo);
         ana.accion(MsgCliente.empezar);
+        for (final j in [ana, beto, caro]) {
+          j.distribuir();
+        }
         caro.caer();
         await esperar(200);
         final e = ana.estado;
@@ -546,6 +838,249 @@ void main() {
       expect(ana.canal.tipos, [MsgServidor.sinSala]);
       ana.accion(MsgCliente.tirar);
       expect(ana.canal.ultimoError, contains('ninguna sala'));
+    });
+  });
+
+  group('Rendición, desconexión, abandono y terminado', () {
+    test('las cuatro situaciones se distinguen en el estado', () {
+      final (ana, beto, codigo) = parejaEnLobby();
+      final caro = Jugador(g, 'caro')..unirse(codigo);
+      final dani = Jugador(g, 'dani')..unirse(codigo);
+      ana.accion(MsgCliente.empezar);
+      for (final j in [ana, beto, caro, dani]) {
+        j.distribuir();
+      }
+      final sala = g.sala(codigo)!;
+
+      // Terminado: tablero sin jugadas posibles (preparado a mano) y se
+      // evalúa al repartir el siguiente turno.
+      bloquear(sala.partida!.jugador(dani.id)!, Random(3));
+      final porId = {
+        for (final j in [ana, beto, caro, dani]) j.id: j,
+      };
+      jugarTurno(porId[ana.estado.turnoDe]!);
+
+      beto.accion(MsgCliente.conceder); // rendición explícita
+      caro.caer(); // desconexión temporal con gracia vigente
+      dani.caer(); // el terminado también puede perder la conexión
+
+      final e = ana.estado;
+      final b = e.jugador(beto.id)!;
+      final c = e.jugador(caro.id)!;
+      final d = e.jugador(dani.id)!;
+      expect(
+        (b.estado, b.conectado, b.participa),
+        (EstadoJugador.concedio, true, false),
+        reason: 'Rendido: sigue conectado pero ya no puede ganar',
+      );
+      expect(c.estado, anyOf(EstadoJugador.jugando, EstadoJugador.terminado));
+      expect(c.conectado, isFalse);
+      expect(c.graciaRestante, greaterThan(0));
+      expect(c.participa, isTrue, reason: 'en gracia sigue participando');
+      expect(
+        (d.estado, d.conectado, d.participa),
+        (EstadoJugador.terminado, false, true),
+        reason: 'Terminado: elegible aunque esté sin conexión',
+      );
+      expect(e.fase, FaseSala.jugando);
+    });
+
+    test(
+      'abandono confirmado: al vencer la gracia queda como abandonó',
+      () async {
+        nuevo(graciaPartida: const Duration(milliseconds: 60));
+        final (ana, beto, codigo) = parejaEnLobby();
+        final caro = Jugador(g, 'caro')..unirse(codigo);
+        ana.accion(MsgCliente.empezar);
+        for (final j in [ana, beto, caro]) {
+          j.distribuir();
+        }
+        caro.caer();
+        expect(
+          ana.estado.jugador(caro.id)!.estado,
+          isNot(EstadoJugador.abandono),
+        );
+        await esperar(160);
+        final c = ana.estado.jugador(caro.id)!;
+        expect(c.estado, EstadoJugador.abandono);
+        expect(c.participa, isFalse);
+        expect(
+          ana.estado.fase,
+          FaseSala.jugando,
+          reason: 'quedan dos elegibles',
+        );
+      },
+    );
+
+    for (final orden in [(0, 1), (1, 0)]) {
+      test(
+        'dos desconectados con el plazo vencido: sin ganador, '
+        'sea cual sea el temporizador que salte primero (orden $orden)',
+        () async {
+          var reloj = DateTime(2026, 1, 1);
+          nuevo(
+            graciaPartida: const Duration(milliseconds: 50),
+            ahora: () => reloj,
+          );
+          final (ana, beto, codigo) = parejaEnLobby();
+          ana.accion(MsgCliente.empezar);
+          ana.distribuir();
+          beto.distribuir();
+          final sala = g.sala(codigo)!;
+          final jugadores = [ana, beto];
+
+          // Los dos pierden la conexión en el mismo instante, en este orden.
+          jugadores[orden.$1].caer();
+          jugadores[orden.$2].caer();
+          // Cuando salte el primer temporizador, ambos plazos ya vencieron.
+          reloj = reloj.add(const Duration(seconds: 10));
+          await esperar(200);
+
+          final p = sala.partida!;
+          expect(p.terminada, isTrue);
+          expect(p.resultado!.ganadores, isEmpty);
+          expect(p.resultado!.motivo, MotivoFin.abandono);
+          expect(p.jugador(ana.id)!.estado, EstadoJugador.abandono);
+          expect(p.jugador(beto.id)!.estado, EstadoJugador.abandono);
+          expect(
+            p.mensaje,
+            'ana y beto se desconectaron y no volvieron. Nadie gana.',
+          );
+          expect(g.totalSalas, 0);
+        },
+      );
+    }
+
+    test('quien sigue dentro de su plazo no se convierte en abandonado', () async {
+      var reloj = DateTime(2026, 1, 1);
+      nuevo(
+        graciaPartida: const Duration(milliseconds: 300),
+        ahora: () => reloj,
+      );
+      final (ana, beto, codigo) = parejaEnLobby();
+      ana.accion(MsgCliente.empezar);
+      ana.distribuir();
+      beto.distribuir();
+      final sala = g.sala(codigo)!;
+
+      ana.caer(); // su plazo vence a los 300 ms
+      await esperar(150);
+      reloj = reloj.add(const Duration(milliseconds: 150));
+      beto.caer(); // su plazo vence a los 450 ms
+      // Cuando salte el temporizador de Ana, la referencia es +310 ms: el plazo
+      // de Ana venció y el de Beto no.
+      reloj = reloj.add(const Duration(milliseconds: 160));
+      await esperar(230);
+
+      final p = sala.partida!;
+      expect(p.jugador(ana.id)!.estado, EstadoJugador.abandono);
+      expect(
+        p.jugador(beto.id)!.estado,
+        isNot(EstadoJugador.abandono),
+        reason: 'todavía estaba dentro de su plazo',
+      );
+      expect(p.terminada, isTrue, reason: 'queda un solo elegible');
+      expect(p.resultado!.ganadores, [beto.id]);
+    });
+
+    test(
+      'con tres, dos plazos vencidos a la vez: gana quien sigue conectado',
+      () async {
+        var reloj = DateTime(2026, 1, 1);
+        nuevo(
+          graciaPartida: const Duration(milliseconds: 50),
+          ahora: () => reloj,
+        );
+        final (ana, beto, codigo) = parejaEnLobby();
+        final caro = Jugador(g, 'caro')..unirse(codigo);
+        ana.accion(MsgCliente.empezar);
+        for (final j in [ana, beto, caro]) {
+          j.distribuir();
+        }
+        beto.caer();
+        caro.caer();
+        reloj = reloj.add(const Duration(seconds: 10));
+        await esperar(200);
+        final e = ana.estado;
+        expect(e.fase, FaseSala.terminada);
+        expect(e.resultado!.ganadores, [ana.id]);
+        expect(e.resultado!.motivo, MotivoFin.abandono);
+      },
+    );
+
+    test(
+      'rendido más un abandono confirmado, sin nadie más: sin ganador',
+      () async {
+        var reloj = DateTime(2026, 1, 1);
+        nuevo(
+          graciaPartida: const Duration(milliseconds: 50),
+          ahora: () => reloj,
+        );
+        final (ana, beto, codigo) = parejaEnLobby();
+        final caro = Jugador(g, 'caro')..unirse(codigo);
+        ana.accion(MsgCliente.empezar);
+        for (final j in [ana, beto, caro]) {
+          j.distribuir();
+        }
+        final sala = g.sala(codigo)!;
+        caro.accion(MsgCliente.conceder); // rendición explícita
+        ana.caer();
+        beto.caer();
+        reloj = reloj.add(const Duration(seconds: 10));
+        await esperar(200);
+        final p = sala.partida!;
+        expect(p.terminada, isTrue);
+        expect(p.resultado!.ganadores, isEmpty);
+        expect(p.jugador(caro.id)!.estado, EstadoJugador.concedio);
+      },
+    );
+  });
+
+  group('Puntuación inicial y reconexión', () {
+    test('no se duplica al editar, confirmar, repetir ni reconectar', () {
+      final ana = Jugador(g, 'ana')..crearSala(mapa: 2); // Nivel 3: 4 + 4
+      final beto = Jugador(g, 'beto')..unirse(ana.estado.codigo);
+      ana.accion(MsgCliente.empezar);
+
+      int puntosDe(Jugador j, Jugador de) => j.estado.jugador(de.id)!.puntos;
+
+      // Editando no hay puntos de nadie.
+      ana.colocarIniciales();
+      expect(puntosDe(beto, ana), 0);
+      final ini = ana.estado.mapaOficial.indicesIniciales;
+      ana.enviar({'tipo': MsgCliente.quitarInicial, 'indice': ini[0]});
+      ana.enviar({
+        'tipo': MsgCliente.colocarInicial,
+        'indice': ini[0],
+        'numero': 1,
+      });
+      expect(puntosDe(beto, ana), 0);
+
+      // Al confirmar cuentan una vez, aunque se repita el mensaje.
+      ana.accion(MsgCliente.confirmarDistribucion);
+      ana.accion(MsgCliente.confirmarDistribucion);
+      expect(puntosDe(beto, ana), 8);
+      expect(puntosDe(ana, ana), 8);
+
+      // Reconectar en la preparación no suma ni resta.
+      ana.caer();
+      ana.volver();
+      expect(puntosDe(ana, ana), 8);
+      expect(puntosDe(beto, ana), 8);
+
+      // Empieza la partida: los puntos siguen siendo los mismos.
+      beto.distribuir();
+      expect(ana.estado.fase, FaseSala.jugando);
+      expect(puntosDe(ana, ana), 8);
+      expect(puntosDe(ana, beto), 8);
+      beto.caer();
+      beto.volver();
+      ana.caer();
+      ana.volver();
+      for (final j in [ana, beto]) {
+        expect(puntosDe(j, ana), 8);
+        expect(puntosDe(j, beto), 8);
+      }
     });
   });
 

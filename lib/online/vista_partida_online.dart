@@ -77,7 +77,8 @@ class _VistaPartidaOnlineState extends State<VistaPartidaOnline> {
     return max(0, base - _cliente.desdeUltimoEstado.inSeconds);
   }
 
-  bool get _activo => _sala.miJugador?.activo ?? false;
+  bool get _activo => _sala.miJugador?.participa ?? false;
+  bool get _yaTermine => _sala.miJugador?.estado == EstadoJugador.terminado;
   bool get _jugando => _sala.fase == FaseSala.jugando;
   bool get _puedoActuar => _sala.esMiTurno && _activo && !_cliente.esperando;
 
@@ -144,7 +145,7 @@ class _VistaPartidaOnlineState extends State<VistaPartidaOnline> {
             ),
             const SizedBox(height: 4),
             const Text(
-              'Quien completa un área se lleva sus puntos.',
+              'Completa áreas en tu tablero para llevarte sus puntos.',
               style: TextStyle(color: Colors.white70),
             ),
             const SizedBox(height: 12),
@@ -264,6 +265,9 @@ class _VistaPartidaOnlineState extends State<VistaPartidaOnline> {
   String _textoEstado(bool hayMovimientos, Set<int> destinos) {
     if (!_activo) {
       return 'Ya no participas. Puedes seguir mirando la partida.';
+    }
+    if (_yaTermine) {
+      return 'Terminaste tu tablero. Esperando a que acaben los demás.';
     }
     if (!_sala.esMiTurno) {
       final quien = _sala.jugador(_sala.turnoDe ?? '')?.nombre ?? '';
@@ -416,7 +420,7 @@ class _VistaPartidaOnlineState extends State<VistaPartidaOnline> {
 
     final ranking = [..._sala.jugadores]
       ..sort((a, b) {
-        if (a.activo != b.activo) return a.activo ? -1 : 1;
+        if (a.participa != b.participa) return a.participa ? -1 : 1;
         return b.puntos.compareTo(a.puntos);
       });
 
@@ -466,19 +470,19 @@ class _VistaPartidaOnlineState extends State<VistaPartidaOnline> {
                       j.id == _sala.yo ? '${j.nombre} (tú)' : j.nombre,
                       overflow: TextOverflow.ellipsis,
                       style: TextStyle(
-                        color: j.activo ? Colors.white : Colors.white54,
+                        color: j.participa ? Colors.white : Colors.white54,
                         fontWeight: FontWeight.w700,
                       ),
                     ),
                   ),
                   if (j.estado == EstadoJugador.concedio)
                     const Text(
-                      'se rindió  ',
+                      'Rendido  ',
                       style: TextStyle(color: Colors.white54, fontSize: 12),
                     ),
                   if (j.estado == EstadoJugador.abandono)
                     const Text(
-                      'abandonó  ',
+                      'Abandonó  ',
                       style: TextStyle(color: Colors.white54, fontSize: 12),
                     ),
                   Text(
@@ -597,21 +601,27 @@ class _FichaJugador extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final fuera = !jugador.activo;
-    String estado = '';
+    final fuera = !jugador.participa;
+    // Estado de participación (nunca se pierde) y, aparte, la conexión.
+    var estado = '';
     Color colorEstado = Colors.white60;
     if (jugador.estado == EstadoJugador.concedio) {
-      estado = 'Se rindió';
+      estado = 'Rendido';
     } else if (jugador.estado == EstadoJugador.abandono) {
       estado = 'Abandonó';
-    } else if (!jugador.conectado) {
-      estado = segundosGracia == null
-          ? 'Sin conexión'
-          : 'Sin conexión ${segundosGracia}s';
-      colorEstado = Colors.redAccent;
+    } else if (jugador.estado == EstadoJugador.terminado) {
+      estado = 'Terminado';
+      colorEstado = Colors.greenAccent;
     } else if (enTurno) {
       estado = segundosTurno == null ? 'Su turno' : 'Turno · ${segundosTurno}s';
       colorEstado = Tema.dorado;
+    }
+    if (!fuera && !jugador.conectado) {
+      final sin = segundosGracia == null
+          ? 'Sin conexión'
+          : 'Sin conexión ${segundosGracia}s';
+      estado = estado.isEmpty ? sin : '$estado · $sin';
+      colorEstado = Colors.redAccent;
     }
 
     return Container(

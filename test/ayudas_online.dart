@@ -130,7 +130,7 @@ JugadorSala jugadorSala(
   String id, {
   bool conectado = true,
   int puntos = 0,
-  EstadoJugador estado = EstadoJugador.activo,
+  EstadoJugador estado = EstadoJugador.jugando,
   int? gracia,
 }) => JugadorSala(
   id: id,

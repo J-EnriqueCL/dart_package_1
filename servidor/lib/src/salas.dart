@@ -85,13 +85,17 @@ class Sala {
   Timer? _timerTurno;
   DateTime? limiteTurno;
 
-  FaseSala get fase => partida == null
-      ? FaseSala.lobby
-      : (partida!.terminada ? FaseSala.terminada : FaseSala.jugando);
+  FaseSala get fase => switch (partida?.fase) {
+    null => FaseSala.lobby,
+    FasePartida.preparacion => FaseSala.preparacion,
+    FasePartida.jugando => FaseSala.jugando,
+    FasePartida.terminada => FaseSala.terminada,
+  };
 
-  /// Cambia cuando empieza o termina un turno; sirve para reprogramar el reloj.
+  /// Cambia al cambiar de fase y cuando empieza o termina un turno; sirve para
+  /// reprogramar el reloj.
   String get claveTurno =>
-      partida == null ? 'lobby' : '${partida!.numTurno}:${partida!.terminada}';
+      partida == null ? 'lobby' : '${partida!.fase.name}:${partida!.numTurno}';
 
   Iterable<Miembro> get presentes => miembros.where((m) => m.presente);
 
@@ -128,7 +132,7 @@ class Sala {
         nombre: m.nombre,
         conectado: conectado,
         puntos: puntos,
-        estado: estado ?? EstadoJugador.activo,
+        estado: estado ?? EstadoJugador.preparando,
         graciaRestante: conectado || !m.presente
             ? null
             : _segundos(m.limiteGracia, ahora),
@@ -152,7 +156,8 @@ class Sala {
       turnoDe: fase == FaseSala.jugando ? p!.turnoDe : null,
       turno: p?.numTurno ?? 1,
       dados: p?.dados == null ? null : List<int>.of(p!.dados!),
-      tablero: p?.tablero ?? const [],
+      // Cada jugador recibe solo su propio tablero.
+      tablero: p?.tableroDe(id) ?? const [],
       mensaje: p?.mensaje ?? mensajeLobby,
       segundosTurno: fase == FaseSala.jugando
           ? _segundos(limiteTurno, ahora)
@@ -256,7 +261,8 @@ class GestorSalas {
       return;
     }
     m.canal = null;
-    final gracia = sala.fase == FaseSala.jugando
+    final gracia =
+        sala.fase == FaseSala.preparacion || sala.fase == FaseSala.jugando
         ? config.graciaPartida
         : config.graciaLobby;
     m.cancelarGracia();
@@ -271,7 +277,23 @@ class GestorSalas {
     if (m.conectado || !m.presente || !identical(_salaDe[m.id], sala)) {
       return;
     }
-    _sacar(sala, m, voluntario: false);
+    // Abandono confirmado: venció su plazo. Se miran, con este mismo instante
+    // de referencia, los demás desconectados cuyo plazo también venció, para
+    // resolverlos juntos: así el resultado (ganador o ninguno) no depende de
+    // qué temporizador se ejecute primero. Quien aún está dentro de su plazo no
+    // se toca.
+    final ahora = _ahora();
+    // (En el orden de la sala, no en el de los temporizadores.)
+    final vencidos = [
+      for (final o in sala.miembros)
+        if (o == m ||
+            (o.presente &&
+                !o.conectado &&
+                o.limiteGracia != null &&
+                !o.limiteGracia!.isAfter(ahora)))
+          o,
+    ];
+    _sacarVarios(sala, vencidos, voluntario: false);
   }
 
   // ---------------------------------------------------------------------
@@ -339,6 +361,14 @@ class GestorSalas {
         return;
       case MsgCliente.empezar:
         _empezar(sala, yo);
+      case MsgCliente.colocarInicial:
+        _partidaEnCurso(
+          sala,
+        ).colocarInicial(yo.id, _entero(msg, 'indice'), _entero(msg, 'numero'));
+      case MsgCliente.quitarInicial:
+        _partidaEnCurso(sala).quitarInicial(yo.id, _entero(msg, 'indice'));
+      case MsgCliente.confirmarDistribucion:
+        _partidaEnCurso(sala).confirmarDistribucion(yo.id);
       case MsgCliente.tirar:
         _partidaEnCurso(sala).tirar(yo.id);
       case MsgCliente.colocar:
@@ -450,29 +480,58 @@ class GestorSalas {
     Miembro m, {
     required bool voluntario,
     bool avisar = true,
+  }) => _sacarVarios(sala, [m], voluntario: voluntario, avisar: avisar);
+
+  /// Como [_sacar] para varios miembros a la vez: primero se les saca a todos
+  /// y después se decide el estado de la partida una sola vez.
+  void _sacarVarios(
+    Sala sala,
+    List<Miembro> salen, {
+    required bool voluntario,
+    bool avisar = true,
   }) {
     final claveAntes = sala.claveTurno;
-    final canal = m.canal;
-    m.cancelarGracia();
-    m.canal = null;
-    _salaDe.remove(m.id);
+    final canales = [for (final m in salen) m.canal];
+    for (final m in salen) {
+      m.cancelarGracia();
+      m.canal = null;
+      _salaDe.remove(m.id);
+    }
 
     if (sala.partida == null) {
-      sala.miembros.remove(m);
-      sala.mensajeLobby = '${m.nombre} salió.';
+      for (final m in salen) {
+        sala.miembros.remove(m);
+      }
+      sala.mensajeLobby = salen.length == 1
+          ? '${salen.single.nombre} salió.'
+          : '${salen.map((m) => m.nombre).join(' y ')} salieron.';
     } else {
-      m.presente = false;
       final p = sala.partida!;
+      for (final m in salen) {
+        m.presente = false;
+      }
       if (voluntario) {
-        if (!p.terminada && p.jugador(m.id)?.activo == true) {
-          p.conceder(m.id);
+        for (final m in salen) {
+          if (!p.terminada && p.jugador(m.id)?.participa == true) {
+            p.conceder(m.id);
+          }
         }
       } else {
-        p.abandonar(m.id, motivo: 'se desconectó y no volvió');
+        p.abandonarVarios(
+          [for (final m in salen) m.id],
+          motivo: 'se desconectó y no volvió',
+          motivoPlural: 'se desconectaron y no volvieron',
+        );
       }
     }
-    if (avisar) canal?.enviar({'tipo': MsgServidor.sinSala});
-    if (!_canales.containsKey(m.id)) _nombres.remove(m.id);
+    if (avisar) {
+      for (final c in canales) {
+        c?.enviar({'tipo': MsgServidor.sinSala});
+      }
+    }
+    for (final m in salen) {
+      if (!_canales.containsKey(m.id)) _nombres.remove(m.id);
+    }
 
     if (sala.presentes.isEmpty) {
       _eliminar(sala);
@@ -486,7 +545,7 @@ class GestorSalas {
     final p = sala.partida;
     bool apto(Miembro m) =>
         m.presente &&
-        (p == null || p.terminada || p.jugador(m.id)?.activo == true);
+        (p == null || p.terminada || p.jugador(m.id)?.participa == true);
     final actual = sala.miembro(sala.anfitrionId);
     if (actual != null && apto(actual)) return;
     final nuevo =

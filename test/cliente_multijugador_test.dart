@@ -367,6 +367,44 @@ void main() {
   });
 
   group('Acciones', () {
+    test('la preparación envía colocar, quitar y confirmar', () async {
+      final canal = await conectado();
+      canal.servidorEstado(estadoSala(fase: FaseSala.preparacion));
+      await esperar(5);
+      expect(cliente.colocarInicial(12, 4), isTrue);
+      expect(canal.enviados.last, {
+        'tipo': MsgCliente.colocarInicial,
+        'indice': 12,
+        'numero': 4,
+      });
+      canal.servidorEstado(estadoSala(fase: FaseSala.preparacion));
+      await esperar(5);
+      expect(cliente.quitarInicial(12), isTrue);
+      expect(canal.enviados.last, {
+        'tipo': MsgCliente.quitarInicial,
+        'indice': 12,
+      });
+      canal.servidorEstado(estadoSala(fase: FaseSala.preparacion));
+      await esperar(5);
+      expect(cliente.confirmarDistribucion(), isTrue);
+      expect(canal.enviados.last, {'tipo': MsgCliente.confirmarDistribucion});
+    });
+
+    test(
+      'la sala recibida en preparación conserva el tablero propio',
+      () async {
+        final canal = await conectado();
+        final t = List<int?>.filled(49, null)
+          ..[mapasOficiales.first.indicesIniciales[1]] = 3;
+        canal.servidorEstado(
+          estadoSala(fase: FaseSala.preparacion, tablero: t),
+        );
+        await esperar(5);
+        expect(cliente.sala!.fase, FaseSala.preparacion);
+        expect(cliente.sala!.numerosPorColocar, [1, 2, 4, 5, 6]);
+      },
+    );
+
     test('se envía una a la vez hasta recibir respuesta', () async {
       final canal = await conectado();
       expect(cliente.crearSala(2), isTrue);

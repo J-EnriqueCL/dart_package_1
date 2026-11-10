@@ -1,2 +1,1 @@
-export 'src/dart_package_1_base.dart';
-export 'src/mapas.dart';
+export 'package:brilliant_nucleo/brilliant_nucleo.dart';

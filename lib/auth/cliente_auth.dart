@@ -34,6 +34,12 @@ class ClienteAuth extends ChangeNotifier {
   bool get haySesion => _token != null;
   String? get correo => _correo;
 
+  /// JWT de la sesión actual (null sin sesión); lo usa el cliente multijugador.
+  String? get token => _token;
+
+  /// Dirección base del servidor.
+  Uri get urlBase => _base;
+
   Future<void> registrar(String correo, String contrasena) async {
     await _enviar('POST', '/registro', {
       'correo': correo,

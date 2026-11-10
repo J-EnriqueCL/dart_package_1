@@ -1,0 +1,11 @@
+name: brilliant_nucleo
+description: Reglas del juego y protocolo multijugador compartidos por la app y el servidor.
+publish_to: none
+version: 1.0.0
+
+environment:
+  sdk: ^3.13.1
+
+dev_dependencies:
+  test: ^1.25.6
+  lints: ^6.0.0

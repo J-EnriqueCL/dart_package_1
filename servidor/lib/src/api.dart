@@ -5,7 +5,9 @@ import 'package:shelf_cors_headers/shelf_cors_headers.dart';
 import 'package:shelf_router/shelf_router.dart';
 
 import 'almacen.dart';
+import 'salas.dart';
 import 'servicio_auth.dart';
+import 'ws.dart';
 
 const _json = {'content-type': 'application/json; charset=utf-8'};
 
@@ -27,7 +29,12 @@ String _campo(Map<String, Object?> d, String k) {
   return v;
 }
 
-Handler crearApi(ServicioAuth auth, {String? origenPermitido}) {
+/// Si se da [gestor], también atiende las partidas multijugador en `/ws`.
+Handler crearApi(
+  ServicioAuth auth, {
+  String? origenPermitido,
+  GestorSalas? gestor,
+}) {
   final r = Router();
 
   r.post('/registro', (Request req) async {
@@ -59,6 +66,13 @@ Handler crearApi(ServicioAuth auth, {String? origenPermitido}) {
     await auth.borrarCuenta(u, _campo(d, 'contrasena'));
     return _resp(200, {'ok': true});
   });
+
+  if (gestor != null) {
+    r.get(
+      '/ws',
+      crearManejadorWs(auth, gestor, origenPermitido: origenPermitido),
+    );
+  }
 
   return const Pipeline()
       .addMiddleware(
@@ -104,6 +118,9 @@ Middleware _manejarErrores() =>
             'x-content-type-options': 'nosniff',
           },
         );
+      } on HijackException {
+        // La conexión pasó a manos del WebSocket; no hay respuesta HTTP.
+        rethrow;
       } on ErrorAuth catch (e) {
         return _resp(e.codigo, {'error': e.mensaje});
       } catch (e, st) {

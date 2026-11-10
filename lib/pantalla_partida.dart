@@ -6,6 +6,7 @@ import 'bloc/partida_bloc.dart';
 import 'dart_package_1.dart';
 import 'tema.dart';
 import 'widgets/celda_gema.dart';
+import 'widgets/dado.dart';
 
 class PantallaPartida extends StatefulWidget {
   const PantallaPartida({super.key, required this.controlador, this.azar});
@@ -170,9 +171,9 @@ class _PantallaPartidaState extends State<PantallaPartida> {
             ),
           ),
           const Spacer(),
-          _Pastilla(icono: Icons.flag_rounded, texto: 'Turno ${_bloc.turno}'),
+          Pastilla(icono: Icons.flag_rounded, texto: 'Turno ${_bloc.turno}'),
           const SizedBox(width: 8),
-          _Pastilla(
+          Pastilla(
             icono: Icons.diamond_rounded,
             texto: '${_bloc.puntuacionTotal} pts',
             destacado: true,
@@ -231,13 +232,11 @@ class _PantallaPartidaState extends State<PantallaPartida> {
   Widget _panelInferior() {
     final dados = _bloc.dados;
 
-    _RolDado rol(int posicion) {
+    RolDado rol(int posicion) {
       if (_bloc.posicionAncla == null) {
-        return _RolDado.ninguno;
+        return RolDado.ninguno;
       }
-      return _bloc.posicionAncla == posicion
-          ? _RolDado.ancla
-          : _RolDado.aColocar;
+      return _bloc.posicionAncla == posicion ? RolDado.ancla : RolDado.aColocar;
     }
 
     return Container(
@@ -272,7 +271,7 @@ class _PantallaPartidaState extends State<PantallaPartida> {
             children: [
               for (var posicion = 0; posicion < 2; posicion++) ...[
                 if (posicion == 1) const SizedBox(width: 18),
-                _Dado(
+                Dado(
                   key: Key('dado_$posicion'),
                   valor: dados?[posicion],
                   rol: rol(posicion),
@@ -368,123 +367,6 @@ class _PantallaPartidaState extends State<PantallaPartida> {
                 },
               ),
             ),
-          ),
-        ),
-      ),
-    );
-  }
-}
-
-class _Pastilla extends StatelessWidget {
-  const _Pastilla({
-    required this.icono,
-    required this.texto,
-    this.destacado = false,
-  });
-
-  final IconData icono;
-  final String texto;
-  final bool destacado;
-
-  @override
-  Widget build(BuildContext context) {
-    return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 7),
-      decoration: BoxDecoration(
-        color: destacado ? Tema.dorado : Colors.white.withValues(alpha: 0.1),
-        borderRadius: BorderRadius.circular(20),
-      ),
-      child: Row(
-        mainAxisSize: MainAxisSize.min,
-        children: [
-          Icon(icono, size: 16, color: destacado ? Tema.tinta : Colors.white),
-          const SizedBox(width: 6),
-          Text(
-            texto,
-            style: TextStyle(
-              color: destacado ? Tema.tinta : Colors.white,
-              fontWeight: FontWeight.w800,
-            ),
-          ),
-        ],
-      ),
-    );
-  }
-}
-
-enum _RolDado { ninguno, ancla, aColocar }
-
-class _Dado extends StatelessWidget {
-  const _Dado({
-    super.key,
-    required this.valor,
-    required this.rol,
-    required this.activo,
-    required this.onTap,
-  });
-
-  final int? valor;
-  final _RolDado rol;
-  final bool activo;
-  final VoidCallback? onTap;
-
-  @override
-  Widget build(BuildContext context) {
-    final esAncla = rol == _RolDado.ancla;
-    final esColocar = rol == _RolDado.aColocar;
-
-    String etiqueta = 'DADO';
-    if (esAncla) {
-      etiqueta = 'ANCLA';
-    } else if (esColocar) {
-      etiqueta = 'A COLOCAR';
-    } else if (valor != null) {
-      etiqueta = 'ELEGIR';
-    }
-
-    return Opacity(
-      opacity: activo ? 1 : 0.4,
-      child: GestureDetector(
-        onTap: onTap,
-        child: AnimatedContainer(
-          duration: const Duration(milliseconds: 180),
-          width: 92,
-          height: 92,
-          decoration: BoxDecoration(
-            color: esAncla ? Tema.dorado : Colors.white,
-            borderRadius: BorderRadius.circular(20),
-            border: Border.all(
-              color: esColocar ? Tema.dorado : Colors.transparent,
-              width: 4,
-            ),
-            boxShadow: [
-              BoxShadow(
-                color: Colors.black.withValues(alpha: 0.35),
-                blurRadius: 8,
-                offset: const Offset(0, 4),
-              ),
-            ],
-          ),
-          child: Column(
-            mainAxisAlignment: MainAxisAlignment.center,
-            children: [
-              Text(
-                valor?.toString() ?? '?',
-                style: const TextStyle(
-                  fontSize: 40,
-                  fontWeight: FontWeight.w900,
-                  color: Tema.tinta,
-                ),
-              ),
-              Text(
-                etiqueta,
-                style: const TextStyle(
-                  fontSize: 10,
-                  fontWeight: FontWeight.w800,
-                  color: Tema.tinta,
-                ),
-              ),
-            ],
           ),
         ),
       ),

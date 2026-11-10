@@ -5,3 +5,6 @@
 # Avoid committing pubspec.lock for library packages; see
 # https://dart.dev/tools/pub/private-files#pubspec-lock.
 pubspec.lock
+
+# Salida de compilación (se regenera con flutter build / flutter test).
+build/

@@ -5,6 +5,7 @@ import 'package:flutter/material.dart';
 import 'auth/cliente_auth.dart';
 import 'auth/pantalla_acceso.dart';
 import 'dart_package_1.dart';
+import 'online/pantalla_multijugador.dart';
 import 'pantalla_numeros_iniciales.dart';
 import 'tema.dart';
 
@@ -22,6 +23,12 @@ class PantallaSeleccionMapa extends StatelessWidget {
     if (await confirmarBorrarCuenta(context, auth)) {
       mensajes.showSnackBar(const SnackBar(content: Text('Cuenta borrada')));
     }
+  }
+
+  void _jugarEnLinea(BuildContext context, ClienteAuth auth) {
+    Navigator.of(context).push(
+      MaterialPageRoute<void>(builder: (_) => PantallaMultijugador(auth: auth)),
+    );
   }
 
   void _elegir(BuildContext context, MapaOficial mapa) {
@@ -91,6 +98,23 @@ class PantallaSeleccionMapa extends StatelessWidget {
                     'Elige un mapa para jugar',
                     style: TextStyle(color: Colors.white70),
                   ),
+                  if (auth != null)
+                    Padding(
+                      padding: const EdgeInsets.only(top: 12),
+                      child: FilledButton.icon(
+                        key: const Key('boton_multijugador'),
+                        onPressed: () => _jugarEnLinea(context, auth),
+                        icon: const Icon(Icons.groups_rounded),
+                        label: const Text('Jugar en línea con amigos'),
+                        style: FilledButton.styleFrom(
+                          backgroundColor: Tema.dorado,
+                          foregroundColor: Tema.tinta,
+                          textStyle: const TextStyle(
+                            fontWeight: FontWeight.w800,
+                          ),
+                        ),
+                      ),
+                    ),
                   Expanded(
                     child: GridView.count(
                       padding: const EdgeInsets.all(16),

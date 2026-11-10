@@ -1,10 +1,17 @@
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 
 import 'auth/cliente_auth.dart';
 import 'auth/pantalla_acceso.dart';
 import 'pantalla_seleccion_mapa.dart';
 
 void main() {
+  WidgetsFlutterBinding.ensureInitialized();
+  // El tablero está pensado para pantalla vertical; en horizontal no cabe.
+  SystemChrome.setPreferredOrientations(const [
+    DeviceOrientation.portraitUp,
+    DeviceOrientation.portraitDown,
+  ]);
   runApp(AplicacionBrilliant(auth: ClienteAuth()));
 }
 

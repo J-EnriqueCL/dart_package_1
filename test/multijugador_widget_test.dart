@@ -242,15 +242,33 @@ void main() {
       expect(find.textContaining('Esperando a que el anfitrión'), findsOne);
     });
 
-    prueba('el anfitrión elige mapa y expulsa', (tester) async {
+    prueba('solo el Nivel 1 está disponible; el anfitrión expulsa', (
+      tester,
+    ) async {
       await abrirCon(tester, estadoSala());
-      await tap(tester, find.byKey(const Key('mapa_2')));
+      // Los niveles 2, 3 y 4 salen como no disponibles y no se pueden elegir.
+      for (final i in [1, 2, 3]) {
+        expect(
+          find.text('Nivel ${i + 1} (no disponible)'),
+          findsOneWidget,
+          reason: 'mapa $i',
+        );
+        await tap(tester, find.byKey(Key('mapa_$i')));
+      }
+      expect(servidor.ultima.ultimoDe(MsgCliente.elegirMapa), isNull);
+      expect(find.text('Nivel 1'), findsWidgets);
+      await tap(tester, find.byKey(const Key('mapa_0')));
       expect(servidor.ultima.ultimoDe(MsgCliente.elegirMapa), {
         'tipo': MsgCliente.elegirMapa,
-        'mapa': 2,
+        'mapa': 0,
       });
-      await recibir(tester, estadoSala(mapa: 2));
+      await recibir(tester, estadoSala()); // el servidor responde
 
+      await tester.scrollUntilVisible(
+        find.byKey(const Key('expulsar_b')),
+        100,
+        scrollable: find.byType(Scrollable).first,
+      );
       await tap(tester, find.byKey(const Key('expulsar_b')));
       expect(servidor.ultima.ultimoDe(MsgCliente.expulsar), {
         'tipo': MsgCliente.expulsar,
@@ -273,6 +291,29 @@ void main() {
       await bombear(tester);
       expect(find.byKey(const Key('boton_crear_sala')), findsOneWidget);
       expect(find.text('El anfitrión te sacó de la sala.'), findsOneWidget);
+    });
+  });
+
+  group('Lobby: jugadores y meta', () {
+    prueba('muestra la meta provisional según los jugadores y hasta 5', (
+      tester,
+    ) async {
+      EstadoSala lobby(int n) => estadoSala(
+        jugadores: [
+          for (var i = 0; i < n; i++) jugadorSala(String.fromCharCode(97 + i)),
+        ],
+      );
+      await abrirCon(tester, lobby(2));
+      expect(find.text('JUGADORES (2/5)'), findsOneWidget);
+      for (final (n, meta) in [(2, 26), (3, 24), (4, 22), (5, 20)]) {
+        await recibir(tester, lobby(n));
+        expect(find.text('JUGADORES ($n/5)'), findsOneWidget);
+        expect(
+          find.textContaining('Meta con $n jugadores: $meta puntos'),
+          findsOneWidget,
+        );
+      }
+      expect(find.byKey(const Key('jugador_e')), findsOneWidget);
     });
   });
 
@@ -536,7 +577,7 @@ void main() {
 
   group('Estados en partida', () {
     EstadoSala conEstados(List<JugadorSala> js, {String yo = 'a'}) =>
-        estadoSala(yo: yo, fase: FaseSala.jugando, turnoDe: 'b', jugadores: js);
+        estadoSala(yo: yo, fase: FaseSala.jugando, jugadores: js);
 
     prueba('terminado, rendido, abandonó y sin conexión se distinguen', (
       tester,
@@ -592,37 +633,87 @@ void main() {
   });
 
   group('Partida', () {
+    /// Ronda abierta con dados si se dan [dados]; si no, esperando tirada.
     EstadoSala jugando({
       String yo = 'a',
-      String turnoDe = 'a',
       List<int>? dados,
       List<int?>? tablero,
       List<JugadorSala>? jugadores,
-      int turno = 1,
+      Map<String, Resolucion>? resoluciones,
+      int ronda = 1,
+      int? segundos,
     }) => estadoSala(
       yo: yo,
       fase: FaseSala.jugando,
-      turnoDe: turnoDe,
       dados: dados,
       tablero: tablero,
       jugadores: jugadores,
-      turno: turno,
+      resoluciones: resoluciones,
+      ronda: ronda,
+      segundos: segundos,
       mensaje: 'Empieza la partida.',
     );
 
-    prueba('mi turno: tirar, elegir ancla y colocar', (tester) async {
-      await abrirCon(tester, jugando());
+    Text texto(WidgetTester tester, String clave) =>
+        tester.widget<Text>(find.byKey(Key(clave)));
+
+    prueba('esperando tirada: muestro la ronda y cualquiera puede tirar', (
+      tester,
+    ) async {
+      await abrirCon(tester, jugando(ronda: 4));
       expect(find.byType(CeldaGema), findsNWidgets(49));
-      expect(find.text('Es tu turno. Tira los dados.'), findsOneWidget);
+      expect(find.text('Ronda 4'), findsOneWidget);
+      expect(find.textContaining('Turno'), findsNothing);
+      expect(
+        find.text('Esperando tirada. Cualquiera puede lanzar los dados.'),
+        findsOneWidget,
+      );
       expect(habilitado(tester, 'boton_tirar_dados'), isTrue);
-      expect(habilitado(tester, 'boton_pasar_turno'), isFalse);
+      expect(find.byKey(const Key('boton_confirmar_jugada')), findsNothing);
+      expect(find.byKey(const Key('boton_pasar_ronda')), findsNothing);
+      expect(find.byKey(const Key('tiempo_ronda')), findsNothing);
 
+      // Quien no es el anfitrión también puede lanzar.
       await tap(tester, find.byKey(const Key('boton_tirar_dados')));
-      expect(servidor.ultima.ultimoDe(MsgCliente.tirar), isNotNull);
+      expect(servidor.ultima.ultimoDe(MsgCliente.tirar), {
+        'tipo': MsgCliente.tirar,
+        'ronda': 4,
+      });
+    });
 
-      await recibir(tester, jugando(dados: [1, 2]));
-      expect(find.text('2'), findsWidgets);
+    prueba('rendidos y terminados no pueden lanzar', (tester) async {
+      await abrirCon(
+        tester,
+        jugando(
+          jugadores: [
+            jugadorSala('a', estado: EstadoJugador.concedio),
+            jugadorSala('b'),
+          ],
+        ),
+      );
       expect(habilitado(tester, 'boton_tirar_dados'), isFalse);
+      await recibir(
+        tester,
+        jugando(
+          jugadores: [
+            jugadorSala('a', estado: EstadoJugador.terminado),
+            jugadorSala('b'),
+          ],
+        ),
+      );
+      expect(habilitado(tester, 'boton_tirar_dados'), isFalse);
+    });
+
+    prueba('con dados: previsualizo, y solo "Confirmar jugada" envía', (
+      tester,
+    ) async {
+      await abrirCon(tester, jugando(dados: [1, 2], segundos: 42));
+      expect(find.text('Ronda 1'), findsOneWidget);
+      expect(find.text('Tiempo de la ronda: 42s'), findsOneWidget);
+      expect(find.text('Pendientes: Tú, B'), findsOneWidget);
+      expect(find.byKey(const Key('boton_tirar_dados')), findsNothing);
+      expect(habilitado(tester, 'boton_confirmar_jugada'), isFalse);
+      expect(habilitado(tester, 'boton_pasar_ronda'), isTrue);
 
       // Ancla: dado 1. La casilla 2 tiene un 1; sus vecinos 1 y 3 valen para
       // el 2, y la 9 (azul con un 1) no.
@@ -630,55 +721,68 @@ void main() {
       expect(celda(tester, 1).esDestino, isTrue);
       expect(celda(tester, 3).esDestino, isTrue);
       expect(celda(tester, 9).esDestino, isFalse);
+      expect(habilitado(tester, 'boton_confirmar_jugada'), isFalse);
 
       // Tocar el mismo dado quita la selección.
       await tap(tester, find.byKey(const Key('dado_0')));
       expect(celda(tester, 1).esDestino, isFalse);
       await tap(tester, find.byKey(const Key('dado_0')));
 
+      // Elegir casilla es solo una previsualización: no se envía nada, no cambia
+      // el tablero oficial ni la puntuación.
       await tap(tester, find.byKey(const Key('celda_1')));
-      expect(servidor.ultima.ultimoDe(MsgCliente.colocar), {
-        'tipo': MsgCliente.colocar,
-        'indice': 1,
+      expect(celda(tester, 1).seleccionada, isTrue);
+      expect(
+        celda(tester, 1).valor,
+        isNull,
+        reason: 'el tablero oficial no cambia',
+      );
+      expect(texto(tester, 'puntos_a').data, '0');
+      expect(
+        servidor.ultima.tiposEnviados,
+        isNot(contains(MsgCliente.confirmarJugada)),
+      );
+      expect(habilitado(tester, 'boton_confirmar_jugada'), isTrue);
+
+      // Cambiar de casilla mueve la previsualización.
+      await tap(tester, find.byKey(const Key('celda_3')));
+      expect(celda(tester, 3).seleccionada, isTrue);
+      expect(celda(tester, 1).seleccionada, isFalse);
+
+      await tap(tester, find.byKey(const Key('boton_confirmar_jugada')));
+      expect(servidor.ultima.ultimoDe(MsgCliente.confirmarJugada), {
+        'tipo': MsgCliente.confirmarJugada,
+        'ronda': 1,
+        'indice': 3,
         'ancla': 0,
       });
     });
 
-    prueba('tocar una casilla que no es destino no envía nada', (tester) async {
+    prueba('tocar una casilla que no es destino no previsualiza ni envía', (
+      tester,
+    ) async {
       await abrirCon(tester, jugando(dados: [1, 2]));
       await tap(tester, find.byKey(const Key('dado_0')));
       await tap(tester, find.byKey(const Key('celda_9')));
       await tap(tester, find.byKey(const Key('celda_40')));
-      expect(servidor.ultima.ultimoDe(MsgCliente.colocar), isNull);
+      expect(celda(tester, 9).seleccionada, isFalse);
+      expect(habilitado(tester, 'boton_confirmar_jugada'), isFalse);
+      expect(servidor.ultima.ultimoDe(MsgCliente.confirmarJugada), isNull);
     });
 
-    prueba('al llegar un turno nuevo se olvida el ancla elegida', (
+    prueba('"Pasar esta ronda" envía el pase aunque haya jugadas', (
       tester,
     ) async {
       await abrirCon(tester, jugando(dados: [1, 2]));
-      await tap(tester, find.byKey(const Key('dado_0')));
-      expect(celda(tester, 1).esDestino, isTrue);
-
-      final tablero = tableroInicial()..[1] = 2;
-      await recibir(tester, jugando(turnoDe: 'b', tablero: tablero, turno: 2));
-      await recibir(tester, jugando(tablero: tablero, turno: 3, dados: [1, 2]));
-      expect(celda(tester, 3).esDestino, isFalse);
+      expect(habilitado(tester, 'boton_pasar_ronda'), isTrue);
+      await tap(tester, find.byKey(const Key('boton_pasar_ronda')));
+      expect(servidor.ultima.ultimoDe(MsgCliente.pasarRonda), {
+        'tipo': MsgCliente.pasarRonda,
+        'ronda': 1,
+      });
     });
 
-    prueba('fuera de mi turno no puedo tirar, pasar ni elegir dado', (
-      tester,
-    ) async {
-      await abrirCon(tester, jugando(yo: 'b', turnoDe: 'a', dados: [1, 2]));
-      expect(find.text('Turno de A.'), findsOneWidget);
-      expect(habilitado(tester, 'boton_tirar_dados'), isFalse);
-      expect(habilitado(tester, 'boton_pasar_turno'), isFalse);
-      await tap(tester, find.byKey(const Key('dado_0')));
-      expect(celda(tester, 1).esDestino, isFalse);
-      // Pero sí veo los dados del rival.
-      expect(find.byKey(const Key('dado_0')), findsOneWidget);
-    });
-
-    prueba('solo se puede pasar cuando los dados no dejan movimientos', (
+    prueba('sin jugadas con estos dados se avisa y se puede pasar', (
       tester,
     ) async {
       // Todo ocupado salvo la casilla 9 (azul), cuya área exige unos.
@@ -691,36 +795,340 @@ void main() {
       tablero[17] = 1;
 
       await abrirCon(tester, jugando(tablero: tablero, dados: [2, 3]));
-      expect(habilitado(tester, 'boton_pasar_turno'), isTrue);
-      expect(find.textContaining('no hay movimientos'), findsOneWidget);
-      await tap(tester, find.byKey(const Key('boton_pasar_turno')));
-      expect(servidor.ultima.ultimoDe(MsgCliente.pasar), isNotNull);
+      expect(
+        find.textContaining('No tienes jugadas con estos dados'),
+        findsOneWidget,
+      );
+      expect(habilitado(tester, 'boton_pasar_ronda'), isTrue);
+      await tap(tester, find.byKey(const Key('boton_pasar_ronda')));
+      expect(servidor.ultima.ultimoDe(MsgCliente.pasarRonda), isNotNull);
     });
 
-    prueba('el marcador muestra a todos y de quién es el turno', (
+    prueba('tras confirmar o pasar espero a los demás y veo quién falta', (
+      tester,
+    ) async {
+      final tablero = tableroInicial()..[1] = 2;
+      await abrirCon(
+        tester,
+        jugando(
+          dados: [1, 2],
+          tablero: tablero,
+          resoluciones: {'a': Resolucion.confirmo, 'b': Resolucion.pendiente},
+        ),
+      );
+      expect(find.text('Esperando a los demás'), findsOneWidget);
+      expect(find.text('Pendientes: B'), findsOneWidget);
+      expect(find.byKey(const Key('boton_confirmar_jugada')), findsNothing);
+      expect(find.byKey(const Key('boton_pasar_ronda')), findsNothing);
+      expect(find.byKey(const Key('boton_tirar_dados')), findsNothing);
+      // Mi tablero sigue visible con mi jugada ya aplicada.
+      expect(celda(tester, 1).valor, 2);
+      expect(texto(tester, 'estado_a').data, 'Jugó');
+      expect(texto(tester, 'estado_b').data, 'Pendiente');
+
+      await recibir(
+        tester,
+        jugando(
+          dados: [1, 2],
+          tablero: tablero,
+          resoluciones: {'a': Resolucion.paso, 'b': Resolucion.pendiente},
+        ),
+      );
+      expect(texto(tester, 'estado_a').data, 'Pasó');
+      expect(find.text('Esperando a los demás'), findsOneWidget);
+    });
+
+    prueba('al cerrarse la ronda se olvida la previsualización', (
+      tester,
+    ) async {
+      await abrirCon(tester, jugando(dados: [1, 2]));
+      await tap(tester, find.byKey(const Key('dado_0')));
+      await tap(tester, find.byKey(const Key('celda_1')));
+      expect(celda(tester, 1).seleccionada, isTrue);
+
+      final tablero = tableroInicial()..[1] = 2;
+      await recibir(tester, jugando(tablero: tablero, ronda: 2));
+      expect(find.text('Ronda 2'), findsOneWidget);
+      expect(habilitado(tester, 'boton_tirar_dados'), isTrue);
+      await recibir(tester, jugando(tablero: tablero, ronda: 2, dados: [1, 2]));
+      expect(celda(tester, 3).esDestino, isFalse, reason: 'sin ancla elegida');
+      expect(celda(tester, 1).seleccionada, isFalse);
+      expect(habilitado(tester, 'boton_confirmar_jugada'), isFalse);
+    });
+
+    prueba('reconectar con la jugada ya aceptada la recupera exactamente', (
+      tester,
+    ) async {
+      final tablero = tableroInicial()..[1] = 2;
+      final aceptada = jugando(
+        dados: [1, 2],
+        tablero: tablero,
+        resoluciones: {'a': Resolucion.confirmo, 'b': Resolucion.pendiente},
+        segundos: 33,
+      );
+      await abrirCon(tester, aceptada);
+      servidor.ultima.servidorCierra();
+      await bombear(tester, 100);
+      expect(find.byKey(const Key('banda_reconectando')), findsOneWidget);
+      expect(celda(tester, 1).valor, 2, reason: 'el tablero no se pierde');
+      await recibir(tester, aceptada);
+      expect(find.byKey(const Key('banda_reconectando')), findsNothing);
+      expect(find.text('Esperando a los demás'), findsOneWidget);
+      expect(celda(tester, 1).valor, 2);
+      expect(find.byKey(const Key('boton_confirmar_jugada')), findsNothing);
+    });
+
+    prueba('el plazo de la ronda se ve y se pone en rojo al final', (
+      tester,
+    ) async {
+      await abrirCon(tester, jugando(dados: [1, 2], segundos: 8));
+      expect(find.text('Tiempo de la ronda: 8s'), findsOneWidget);
+      expect(texto(tester, 'tiempo_ronda').style!.color, Colors.redAccent);
+    });
+
+    prueba('quien terminó su tablero no resuelve y espera', (tester) async {
+      await abrirCon(
+        tester,
+        jugando(
+          dados: [1, 2],
+          jugadores: [
+            jugadorSala('a', estado: EstadoJugador.terminado, puntos: 20),
+            jugadorSala('b'),
+          ],
+        ),
+      );
+      expect(find.byKey(const Key('boton_pasar_ronda')), findsNothing);
+      expect(find.byKey(const Key('boton_confirmar_jugada')), findsNothing);
+      expect(texto(tester, 'estado_a').data, 'Terminado');
+    });
+
+    prueba('muestro mi puntuación sobre la meta y los premios de cada grupo', (
+      tester,
+    ) async {
+      await abrirCon(
+        tester,
+        estadoSala(
+          fase: FaseSala.jugando,
+          meta: 26,
+          jugadores: [
+            jugadorSala('a', puntos: 18),
+            jugadorSala('b', puntos: 7),
+          ],
+        ),
+      );
+      expect(find.text('18 / 26'), findsOneWidget);
+      // Un chip por cada uno de los 9 grupos, con el próximo premio.
+      final grupos = mapasOficiales.first.gruposPremio;
+      expect(grupos, hasLength(9));
+      for (final g in grupos) {
+        expect(find.byKey(Key('premio_${g.id}')), findsOneWidget);
+      }
+      Text chip(String id) => tester.widget<Text>(
+        find.descendant(
+          of: find.byKey(Key('premio_$id')),
+          matching: find.byType(Text),
+        ),
+      );
+      expect(chip('N1-a0').data, '8'); // amarillo
+      expect(chip('N1-a1').data, '4'); // verde
+      expect(chip('N1-a2').data, '7'); // azul
+      expect(chip('N1-a15').data, '6'); // rojo
+    });
+
+    prueba('los premios usados avanzan, se marcan agotados y los míos', (
+      tester,
+    ) async {
+      EstadoSala con(
+        List<ReclamacionGrupo> r, {
+        List<String> pend = const [],
+      }) => estadoSala(
+        fase: FaseSala.jugando,
+        reclamaciones: r,
+        misPendientes: pend,
+      );
+      Text chip(String id) => tester.widget<Text>(
+        find.descendant(
+          of: find.byKey(Key('premio_$id')),
+          matching: find.byType(Text),
+        ),
+      );
+      await abrirCon(tester, con(const []));
+      await recibir(
+        tester,
+        con(const [
+          ReclamacionGrupo(
+            grupo: 'N1-a2',
+            niveles: [
+              ['b'],
+            ],
+          ),
+          ReclamacionGrupo(
+            grupo: 'N1-a34',
+            niveles: [
+              ['b'],
+              ['c'],
+              ['d'],
+            ],
+          ),
+        ]),
+      );
+      expect(chip('N1-a2').data, '5', reason: 'el siguiente nivel de 7/5/3');
+      expect(chip('N1-a34').data, '0', reason: 'agotado');
+      await recibir(
+        tester,
+        con(
+          const [
+            ReclamacionGrupo(
+              grupo: 'N1-a2',
+              niveles: [
+                ['a'],
+              ],
+            ),
+          ],
+          pend: const ['N1-a0'],
+        ),
+      );
+      expect(chip('N1-a2').data, '✓', reason: 'ya lo completé');
+      expect(chip('N1-a0').data, '⏳', reason: 'pendiente de liquidar');
+    });
+
+    prueba('lo completado en la ronda se ve como pendiente, no como puntos', (
+      tester,
+    ) async {
+      await abrirCon(
+        tester,
+        estadoSala(
+          fase: FaseSala.jugando,
+          dados: [1, 2],
+          misPendientes: const ['N1-a2'],
+          jugadores: [jugadorSala('a', puntos: 3), jugadorSala('b')],
+        ),
+      );
+      expect(
+        find.textContaining('Completaste: Azul (casilla 2)'),
+        findsOneWidget,
+      );
+      expect(
+        find.textContaining('se premia al cerrar la ronda'),
+        findsOneWidget,
+      );
+      expect(texto(tester, 'puntos_a').data, '3', reason: 'sin sumar todavía');
+    });
+
+    prueba('al cerrar la ronda se muestra el resultado de la liquidación', (
+      tester,
+    ) async {
+      await abrirCon(
+        tester,
+        estadoSala(
+          fase: FaseSala.jugando,
+          ronda: 4,
+          liquidacion: const [
+            Adjudicacion(
+              ronda: 3,
+              jugador: 'a',
+              grupo: 'N1-a2',
+              nivel: 1,
+              puntos: 7,
+            ),
+            Adjudicacion(
+              ronda: 3,
+              jugador: 'b',
+              grupo: 'N1-a2',
+              nivel: 1,
+              puntos: 7,
+            ),
+            Adjudicacion(
+              ronda: 3,
+              jugador: 'c',
+              grupo: 'N1-a34',
+              nivel: 0,
+              puntos: 0,
+            ),
+          ],
+          jugadores: [jugadorSala('a'), jugadorSala('b'), jugadorSala('c')],
+        ),
+      );
+      final t = texto(tester, 'liquidacion_ronda').data!;
+      expect(t, startsWith('Premios de la ronda 3:'));
+      expect(t, contains('Tú +7 (1.º) en Azul (casilla 2)'));
+      expect(t, contains('B +7 (1.º)'));
+      expect(t, contains('C sin premio'));
+    });
+
+    prueba('la hoja de premios detalla niveles, empates y agotados', (
+      tester,
+    ) async {
+      await abrirCon(
+        tester,
+        estadoSala(
+          fase: FaseSala.jugando,
+          reclamaciones: const [
+            ReclamacionGrupo(
+              grupo: 'N1-a2',
+              niveles: [
+                ['a', 'b'],
+                ['c'],
+              ],
+            ),
+          ],
+          jugadores: [jugadorSala('a'), jugadorSala('b'), jugadorSala('c')],
+        ),
+      );
+      await tap(tester, find.byKey(const Key('banda_premios')));
+      final d = texto(tester, 'detalle_N1-a2').data!;
+      expect(d, contains('1.º 7 pts: Tú y B'));
+      expect(d, contains('2.º 5 pts: C'));
+      expect(d, contains('3.º 3 pts: libre'));
+    });
+
+    prueba('al terminar por meta se muestra la meta y el resultado', (
+      tester,
+    ) async {
+      await abrirCon(
+        tester,
+        estadoSala(
+          fase: FaseSala.terminada,
+          meta: 26,
+          mensaje: 'Se alcanzó la meta de 26 puntos. Gana A.',
+          jugadores: [
+            jugadorSala('a', puntos: 31),
+            jugadorSala('b', puntos: 20),
+          ],
+          resultado: const ResultadoPartida(
+            ganadores: ['a'],
+            motivo: MotivoFin.meta,
+          ),
+        ),
+      );
+      expect(find.text('Meta: 26 puntos'), findsOneWidget);
+      expect(find.text('¡Ganaste!'), findsOneWidget);
+      expect(find.textContaining('Se alcanzó la meta de 26'), findsOneWidget);
+    });
+
+    prueba('el marcador muestra a todos y quién sigue pendiente', (
       tester,
     ) async {
       await abrirCon(
         tester,
         jugando(
+          dados: [1, 2],
+          resoluciones: {'a': Resolucion.confirmo, 'b': Resolucion.pendiente},
           jugadores: [jugadorSala('a', puntos: 7), jugadorSala('b', puntos: 4)],
         ),
       );
       expect(find.byKey(const Key('puntos_a')), findsOneWidget);
       expect(tester.widget<Text>(find.byKey(const Key('puntos_a'))).data, '7');
       expect(tester.widget<Text>(find.byKey(const Key('puntos_b'))).data, '4');
-      expect(
-        tester.widget<Text>(find.byKey(const Key('estado_a'))).data,
-        startsWith('Turno'),
-      );
-      expect(tester.widget<Text>(find.byKey(const Key('estado_b'))).data, '');
+      expect(texto(tester, 'estado_a').data, 'Jugó');
+      expect(texto(tester, 'estado_b').data, 'Pendiente');
     });
 
     prueba('un rival desconectado se ve con su cuenta atrás', (tester) async {
       await abrirCon(
         tester,
         jugando(
-          turnoDe: 'b',
+          dados: [1, 2],
           jugadores: [
             jugadorSala('a'),
             jugadorSala('b', conectado: false, gracia: 40),
@@ -729,8 +1137,7 @@ void main() {
       );
       final texto = tester.widget<Text>(find.byKey(const Key('estado_b')));
       expect(texto.data, contains('Sin conexión 40s'));
-      expect(texto.data, startsWith('Turno'), reason: 'conserva su estado');
-      expect(texto.data, contains('s'));
+      expect(texto.data, startsWith('Pendiente'), reason: 'conserva su estado');
     });
 
     prueba('un rival que se rindió aparece como tal', (tester) async {
@@ -771,7 +1178,6 @@ void main() {
       await abrirCon(
         tester,
         jugando(
-          turnoDe: 'b',
           jugadores: [
             jugadorSala('a', estado: EstadoJugador.concedio),
             jugadorSala('b'),
@@ -914,10 +1320,7 @@ void main() {
     prueba('al volver a primer plano reconecta y recupera la partida', (
       tester,
     ) async {
-      await abrirCon(
-        tester,
-        estadoSala(fase: FaseSala.jugando, turnoDe: 'b', turno: 3),
-      );
+      await abrirCon(tester, estadoSala(fase: FaseSala.jugando));
       final primera = servidor.ultima;
 
       tester.binding.handleAppLifecycleStateChanged(AppLifecycleState.paused);
@@ -931,15 +1334,84 @@ void main() {
       expect(primera.cerradoPorCliente, isTrue);
 
       servidor.ultima.servidorEstado(
-        estadoSala(fase: FaseSala.jugando, turnoDe: 'a', turno: 9),
+        estadoSala(fase: FaseSala.jugando, ronda: 9),
       );
       await bombear(tester);
       expect(find.byKey(const Key('banda_reconectando')), findsNothing);
-      expect(find.text('Turno 9'), findsOneWidget);
+      expect(find.text('Ronda 9'), findsOneWidget);
     });
   });
 
   group('Pantallas pequeñas', () {
+    prueba('cinco jugadores caben en 320x568 con meta y premios', (
+      tester,
+    ) async {
+      await abrirCon(tester, null);
+      await tester.binding.setSurfaceSize(const Size(320, 568));
+      addTearDown(() => tester.binding.setSurfaceSize(null));
+      final cinco = [
+        for (final id in ['a', 'b', 'c', 'd', 'e'])
+          jugadorSala(
+            id,
+            puntos: 12,
+            conectado: id != 'c',
+            gracia: id == 'c' ? 45 : null,
+          ),
+      ];
+      await recibir(
+        tester,
+        estadoSala(
+          fase: FaseSala.jugando,
+          dados: [1, 2],
+          jugadores: cinco,
+          misPendientes: const ['N1-a2'],
+        ),
+      );
+      expect(find.byKey(const Key('jugador_e')), findsOneWidget);
+      expect(
+        find.text('12 / 20'),
+        findsOneWidget,
+        reason: 'meta de 5 jugadores',
+      );
+      expect(find.byType(CeldaGema), findsNWidgets(49));
+      final celdaRect = tester.getRect(find.byKey(const Key('celda_0')));
+      expect(celdaRect.width, greaterThan(22));
+      // Los premios caben en una sola fila de chips.
+      final primero = tester.getRect(find.byKey(const Key('premio_N1-a0')));
+      final ultimo = tester.getRect(find.byKey(const Key('premio_N1-a34')));
+      expect(ultimo.right, lessThanOrEqualTo(320));
+      expect((primero.top - ultimo.top).abs(), lessThan(1));
+      for (final k in ['boton_confirmar_jugada', 'boton_pasar_ronda']) {
+        expect(
+          tester.getRect(find.byKey(Key(k))).height,
+          greaterThanOrEqualTo(40),
+        );
+      }
+    });
+
+    prueba('la preparación con cinco jugadores no desborda en 320x568', (
+      tester,
+    ) async {
+      await abrirCon(tester, null);
+      await tester.binding.setSurfaceSize(const Size(320, 568));
+      addTearDown(() => tester.binding.setSurfaceSize(null));
+      await recibir(
+        tester,
+        estadoSala(
+          fase: FaseSala.preparacion,
+          jugadores: [
+            for (final id in ['a', 'b', 'c', 'd', 'e'])
+              jugadorSala(id, estado: EstadoJugador.preparando),
+          ],
+        ),
+      );
+      expect(find.byKey(const Key('jugador_e')), findsOneWidget);
+      expect(
+        find.byKey(const Key('boton_confirmar_distribucion')),
+        findsOneWidget,
+      );
+    });
+
     prueba('la preparación cabe sin desbordes en 320x568', (tester) async {
       await abrirCon(tester, null);
       await tester.binding.setSurfaceSize(const Size(320, 568));
@@ -1022,7 +1494,6 @@ void main() {
           tester,
           estadoSala(
             fase: FaseSala.jugando,
-            turnoDe: 'a',
             dados: [1, 2],
             jugadores: cuatro,
             mensaje: 'A sacó 1 y 2.',
@@ -1033,7 +1504,7 @@ void main() {
         final celdaRect = tester.getRect(find.byKey(const Key('celda_0')));
         // Casillas de al menos ~24 px aun en el móvil más pequeño.
         expect(celdaRect.width, greaterThan(tam.height < 600 ? 24 : 28));
-        for (final k in ['boton_tirar_dados', 'boton_pasar_turno']) {
+        for (final k in ['boton_confirmar_jugada', 'boton_pasar_ronda']) {
           final r = tester.getRect(find.byKey(Key(k)));
           expect(r.height, greaterThanOrEqualTo(40));
         }
@@ -1059,7 +1530,7 @@ void main() {
     prueba('al cortarse muestra la banda, conserva la partida y se recupera', (
       tester,
     ) async {
-      await abrirCon(tester, estadoSala(fase: FaseSala.jugando, turnoDe: 'b'));
+      await abrirCon(tester, estadoSala(fase: FaseSala.jugando));
       expect(find.byKey(const Key('banda_reconectando')), findsNothing);
 
       servidor.ultima.servidorCierra();
@@ -1072,11 +1543,11 @@ void main() {
       await bombear(tester, 30);
       expect(servidor.conexiones, hasLength(2));
       servidor.ultima.servidorEstado(
-        estadoSala(fase: FaseSala.jugando, turnoDe: 'a', turno: 5),
+        estadoSala(fase: FaseSala.jugando, ronda: 5),
       );
       await bombear(tester);
       expect(find.byKey(const Key('banda_reconectando')), findsNothing);
-      expect(find.text('Turno 5'), findsOneWidget);
+      expect(find.text('Ronda 5'), findsOneWidget);
     });
 
     prueba('un fallo de sesión ofrece iniciar sesión de nuevo', (tester) async {

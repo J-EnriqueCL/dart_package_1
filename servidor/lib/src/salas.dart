@@ -14,26 +14,29 @@ abstract class Canal {
 
 class ConfigSalas {
   const ConfigSalas({
-    this.tiempoTurno = const Duration(seconds: 60),
+    this.tiempoRonda = const Duration(seconds: 60),
     this.graciaPartida = const Duration(seconds: 60),
     this.graciaLobby = const Duration(seconds: 20),
-    this.maxTurnosAgotados = 3,
+    this.maxSinRespuesta = 3,
     this.minJugadores = 2,
-    this.maxJugadores = 4,
+    this.maxJugadores = maxJugadoresEnLinea,
     this.maxSalas = 500,
     this.maxFallosUnirse = 8,
     this.ventanaFallosUnirse = const Duration(minutes: 1),
   });
 
-  /// Tiempo máximo para tirar y colocar en un turno.
-  final Duration tiempoTurno;
+  /// Plazo común para resolver una ronda; empieza cuando se publican los
+  /// dados y no se reinicia al confirmar o pasar.
+  final Duration tiempoRonda;
 
   /// Tiempo que se espera a un jugador desconectado durante la partida.
   final Duration graciaPartida;
 
   /// Ídem en el lobby o con la partida ya terminada.
   final Duration graciaLobby;
-  final int maxTurnosAgotados;
+
+  /// Rondas seguidas sin responder que provocan el abandono.
+  final int maxSinRespuesta;
   final int minJugadores;
   final int maxJugadores;
   final int maxSalas;
@@ -82,8 +85,8 @@ class Sala {
   int mapa;
   PartidaOnline? partida;
   String mensajeLobby = '';
-  Timer? _timerTurno;
-  DateTime? limiteTurno;
+  Timer? _timerRonda;
+  DateTime? limiteRonda;
 
   FaseSala get fase => switch (partida?.fase) {
     null => FaseSala.lobby,
@@ -92,10 +95,9 @@ class Sala {
     FasePartida.terminada => FaseSala.terminada,
   };
 
-  /// Cambia al cambiar de fase y cuando empieza o termina un turno; sirve para
-  /// reprogramar el reloj.
-  String get claveTurno =>
-      partida == null ? 'lobby' : '${partida!.fase.name}:${partida!.numTurno}';
+  /// Cambia al cambiar de fase y al abrirse o cerrarse una ronda (no al
+  /// confirmar o pasar); sirve para programar el plazo común una sola vez.
+  String get claveRonda => partida == null ? 'lobby' : partida!.claveRonda;
 
   Iterable<Miembro> get presentes => miembros.where((m) => m.presente);
 
@@ -153,23 +155,30 @@ class Sala {
                 if (miembro(j.id) case final m?)
                   deMiembro(m, puntos: j.puntos, estado: j.estado),
             ],
-      turnoDe: fase == FaseSala.jugando ? p!.turnoDe : null,
-      turno: p?.numTurno ?? 1,
-      dados: p?.dados == null ? null : List<int>.of(p!.dados!),
+      meta: p?.meta,
+      reclamaciones: p == null || p.fase == FasePartida.preparacion
+          ? const []
+          : p.libro.reclamaciones,
+      misPendientes: p == null ? const [] : p.pendientesDe(id),
+      liquidacion: p?.liquidacion ?? const [],
+      ronda: fase == FaseSala.jugando
+          ? p!.ronda(
+              segundos: p.faseRonda == FaseRonda.resolviendo
+                  ? _segundos(limiteRonda, ahora)
+                  : null,
+            )
+          : null,
       // Cada jugador recibe solo su propio tablero.
       tablero: p?.tableroDe(id) ?? const [],
       mensaje: p?.mensaje ?? mensajeLobby,
-      segundosTurno: fase == FaseSala.jugando
-          ? _segundos(limiteTurno, ahora)
-          : null,
       resultado: p?.resultado,
     );
   }
 
   void cancelarTemporizadores() {
-    _timerTurno?.cancel();
-    _timerTurno = null;
-    limiteTurno = null;
+    _timerRonda?.cancel();
+    _timerRonda = null;
+    limiteRonda = null;
     for (final m in miembros) {
       m.cancelarGracia();
     }
@@ -306,6 +315,15 @@ class GestorSalas {
     try {
       _despachar(id, canal, msg);
     } on ErrorJuego catch (e) {
+      // Si el cliente estaba desactualizado (ronda cerrada, doble envío...),
+      // recibe antes el estado real y no se queda esperando.
+      final sala = _salaDe[id];
+      if (sala != null) {
+        canal.enviar({
+          'tipo': MsgServidor.estado,
+          'sala': sala.estadoPara(id, _ahora()).toJson(),
+        });
+      }
       canal.enviar({
         'tipo': MsgServidor.error,
         'codigo': CodigoError.generico,
@@ -343,7 +361,7 @@ class GestorSalas {
     Object? tipo,
     Map<String, Object?> msg,
   ) {
-    final claveAntes = sala.claveTurno;
+    final claveAntes = sala.claveRonda;
     switch (tipo) {
       case MsgCliente.elegirMapa:
         _soloLobby(sala);
@@ -370,12 +388,16 @@ class GestorSalas {
       case MsgCliente.confirmarDistribucion:
         _partidaEnCurso(sala).confirmarDistribucion(yo.id);
       case MsgCliente.tirar:
-        _partidaEnCurso(sala).tirar(yo.id);
-      case MsgCliente.colocar:
-        _partidaEnCurso(sala)
-            .colocar(yo.id, _entero(msg, 'indice'), _entero(msg, 'ancla'));
-      case MsgCliente.pasar:
-        _partidaEnCurso(sala).pasar(yo.id);
+        _partidaEnCurso(sala).tirar(yo.id, _entero(msg, 'ronda'));
+      case MsgCliente.confirmarJugada:
+        _partidaEnCurso(sala).confirmarJugada(
+          yo.id,
+          _entero(msg, 'ronda'),
+          _entero(msg, 'indice'),
+          _entero(msg, 'ancla'),
+        );
+      case MsgCliente.pasarRonda:
+        _partidaEnCurso(sala).pasarRonda(yo.id, _entero(msg, 'ronda'));
       case MsgCliente.conceder:
         _partidaEnCurso(sala).conceder(yo.id);
       case MsgCliente.volverAlLobby:
@@ -455,7 +477,7 @@ class GestorSalas {
       mapa: sala.mapa,
       jugadores: [for (final m in sala.miembros) (id: m.id, nombre: m.nombre)],
       azar: _azar,
-      maxTurnosAgotados: config.maxTurnosAgotados,
+      maxSinRespuesta: config.maxSinRespuesta,
     );
   }
 
@@ -490,7 +512,7 @@ class GestorSalas {
     required bool voluntario,
     bool avisar = true,
   }) {
-    final claveAntes = sala.claveTurno;
+    final claveAntes = sala.claveRonda;
     final canales = [for (final m in salen) m.canal];
     for (final m in salen) {
       m.cancelarGracia();
@@ -562,30 +584,34 @@ class GestorSalas {
   }
 
   // ---------------------------------------------------------------------
-  // Reloj de turno
+  // Plazo común de la ronda
 
-  /// Tras cualquier cambio: reprograma el reloj si cambió el turno y avisa
-  /// a todos. Los cambios ajenos al turno (conexiones, chat...) no lo tocan,
-  /// para que nadie pueda alargar un turno ajeno.
+  /// Tras cualquier cambio: reprograma el plazo si se abrió o cerró una ronda
+  /// y avisa a todos. Confirmar, pasar o reconectar no lo tocan.
   void _tras(Sala sala, String claveAntes) {
     _reasignarAnfitrion(sala);
-    if (sala.claveTurno != claveAntes) _programarTurno(sala);
+    if (sala.claveRonda != claveAntes) _programarRonda(sala);
     _difundir(sala);
   }
 
-  void _programarTurno(Sala sala) {
-    sala._timerTurno?.cancel();
-    sala._timerTurno = null;
-    sala.limiteTurno = null;
-    if (sala.fase != FaseSala.jugando) return;
-    sala.limiteTurno = _ahora().add(config.tiempoTurno);
-    sala._timerTurno = Timer(config.tiempoTurno, () => _turnoAgotado(sala));
+  void _programarRonda(Sala sala) {
+    sala._timerRonda?.cancel();
+    sala._timerRonda = null;
+    sala.limiteRonda = null;
+    // El plazo común solo corre con una ronda abierta (dados publicados); la
+    // espera de la siguiente tirada no tiene plazo.
+    if (sala.fase != FaseSala.jugando ||
+        sala.partida!.faseRonda != FaseRonda.resolviendo) {
+      return;
+    }
+    sala.limiteRonda = _ahora().add(config.tiempoRonda);
+    sala._timerRonda = Timer(config.tiempoRonda, () => _rondaAgotada(sala));
   }
 
-  void _turnoAgotado(Sala sala) {
+  void _rondaAgotada(Sala sala) {
     if (_salas[sala.codigo] != sala || sala.fase != FaseSala.jugando) return;
-    final claveAntes = sala.claveTurno;
-    sala.partida!.tiempoAgotado();
+    final claveAntes = sala.claveRonda;
+    sala.partida!.plazoAgotado();
     _tras(sala, claveAntes);
   }
 
@@ -657,6 +683,9 @@ class GestorSalas {
   int _mapaValido(int mapa) {
     if (mapa < 0 || mapa >= mapasOficiales.length) {
       throw ErrorJuego('Mapa inválido.');
+    }
+    if (!mapasOficiales[mapa].disponibleEnLinea) {
+      throw ErrorJuego('Ese mapa todavía no está disponible en línea.');
     }
     return mapa;
   }

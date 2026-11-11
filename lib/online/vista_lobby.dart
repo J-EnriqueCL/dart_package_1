@@ -124,9 +124,16 @@ class VistaLobby extends StatelessWidget {
                         for (var i = 0; i < mapasOficiales.length; i++)
                           ChoiceChip(
                             key: Key('mapa_$i'),
-                            label: Text(mapasOficiales[i].nombre),
+                            label: Text(
+                              mapasOficiales[i].disponibleEnLinea
+                                  ? mapasOficiales[i].nombre
+                                  : '${mapasOficiales[i].nombre} (no disponible)',
+                            ),
                             selected: sala.mapa == i,
-                            onSelected: libre
+                            // Solo los mapas con tabla de premios validada se
+                            // pueden jugar en línea (por ahora, el Nivel 1).
+                            onSelected:
+                                libre && mapasOficiales[i].disponibleEnLinea
                                 ? (_) => cliente.elegirMapa(i)
                                 : null,
                           ),
@@ -146,6 +153,16 @@ class VistaLobby extends StatelessWidget {
         ),
         const SizedBox(height: 20),
         _Seccion('Jugadores (${sala.jugadores.length}/${sala.maxJugadores})'),
+        const SizedBox(height: 4),
+        Text(
+          metaPara(sala.jugadores.length) == null
+              ? 'Se necesitan al menos $minJugadoresEnLinea jugadores.'
+              : 'Meta con ${sala.jugadores.length} jugadores: '
+                    '${metaPara(sala.jugadores.length)} puntos '
+                    '(se fija al empezar).',
+          key: const Key('meta_lobby'),
+          style: const TextStyle(color: Colors.white70, fontSize: 13),
+        ),
         const SizedBox(height: 8),
         for (final j in sala.jugadores)
           _FilaJugador(

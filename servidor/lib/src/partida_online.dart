@@ -31,16 +31,17 @@ class JugadorPartida {
 
   EstadoJugador estado = EstadoJugador.preparando;
 
-  /// Turnos seguidos que se agotó el tiempo sin que jugara.
-  int turnosAgotados = 0;
+  /// Rondas seguidas que se agotó el plazo sin que respondiera (ni jugando ni
+  /// pasando). Responder, aunque sea pasando, lo reinicia.
+  int sinRespuestaSeguidas = 0;
 
   /// Sigue en la partida y puede ganar (no se rindió ni abandonó).
   bool get participa =>
       estado != EstadoJugador.concedio && estado != EstadoJugador.abandono;
 
-  /// Puntos del tablero. Se calculan siempre a partir de las casillas, así que
-  /// no se acumulan ni se duplican; valen 0 hasta confirmar la distribución.
-  int get puntos => controlador?.puntuacionTotal ?? 0;
+  /// Puntos **adjudicados** por el servidor al liquidar premios (no se
+  /// calculan del tablero: dependen del orden en que se completan los grupos).
+  int puntos = 0;
 
   List<int?> get tablero => controlador == null
       ? List<int?>.of(valores)
@@ -60,26 +61,37 @@ class JugadorPartida {
   }
 }
 
-/// Partida por turnos con un tablero independiente por jugador.
+/// Partida por rondas con un tablero independiente por jugador.
 ///
 /// Fases: **preparación** (cada jugador reparte el 1..6 en las seis posiciones
-/// iniciales de su tablero y lo confirma), **partida** y **terminada**. Cada
-/// turno: el jugador tira dos dados, elige uno como ancla y coloca el otro
-/// número en una casilla vecina a un número igual al ancla, siempre en su
-/// propio tablero. Toda la lógica es autoritativa: el cliente solo pide
-/// acciones y aquí se validan.
+/// iniciales de su tablero y lo confirma), **partida** y **terminada**.
+///
+/// En la partida cada **ronda** tiene una única tirada de dos dados que
+/// comparten todos. Un jugador pide la tirada (cualquiera que siga jugando,
+/// la primera solicitud válida gana) y a partir de ahí **todos resuelven a la
+/// vez**, sin orden: cada uno confirma una jugada en su propio tablero (elige
+/// un dado como ancla y coloca el otro número en una casilla vecina a un
+/// número igual al ancla) o pasa, aunque tenga jugadas. La ronda se cierra
+/// cuando no queda ningún participante pendiente, o al vencer el plazo común;
+/// la siguiente espera una nueva tirada manual.
+///
+/// Toda la lógica es autoritativa y se comprueba al procesar cada acción
+/// (fase, id de ronda y resolución del jugador); el cliente solo pide
+/// acciones.
 class PartidaOnline {
   PartidaOnline({
     required this.mapa,
     required List<({String id, String nombre})> jugadores,
     Random? azar,
-    this.maxTurnosAgotados = 3,
+    this.maxSinRespuesta = 3,
+    List<GrupoPremio>? grupos,
   }) : assert(jugadores.length >= 2),
        _azar = azar ?? Random.secure(),
        jugadores = [
          for (final j in jugadores)
            JugadorPartida(j.id, j.nombre, mapasOficiales[mapa]),
-       ] {
+       ],
+       libro = LibroPremios(grupos ?? mapasOficiales[mapa].gruposPremio) {
     mensaje =
         'Coloca los números del 1 al 6 en las seis posiciones iniciales de '
         'tu tablero.';
@@ -88,23 +100,45 @@ class PartidaOnline {
   /// Índice en [mapasOficiales].
   final int mapa;
   final List<JugadorPartida> jugadores;
-  final int maxTurnosAgotados;
+
+  /// Rondas seguidas sin respuesta que provocan el abandono.
+  final int maxSinRespuesta;
   final Random _azar;
 
-  FasePartida fase = FasePartida.preparacion;
-  int _turnoIdx = 0;
+  /// Historial competitivo de premios (por grupo y nivel).
+  final LibroPremios libro;
 
-  /// Contador global de turnos (empieza en 1).
-  int numTurno = 1;
+  /// Meta de puntos, fijada al empezar según los participantes; null antes.
+  int? meta;
+
+  /// Finalizaciones de la ronda abierta aún sin liquidar: grupo -> jugadores.
+  /// No dan prioridad por orden de llegada: se agrupan al cerrar la ronda.
+  final Map<String, Set<String>> _completadasRonda = {};
+
+  /// Última liquidación realizada (al cerrar una ronda o terminar la
+  /// preparación).
+  List<Adjudicacion> liquidacion = const [];
+
+  FasePartida fase = FasePartida.preparacion;
+
+  /// Identificador de la ronda actual (empieza en 1). Sube al cerrarse.
+  int rondaId = 1;
+  FaseRonda faseRonda = FaseRonda.esperandoTirada;
+
+  /// Dados compartidos de la ronda abierta; null mientras se espera la tirada.
   List<int>? dados;
+
+  /// Participantes de la ronda abierta y su resolución.
+  final Map<String, Resolucion> resoluciones = {};
   ResultadoPartida? resultado;
   late String mensaje;
 
   bool get terminada => fase == FasePartida.terminada;
   MapaOficial get mapaOficial => mapasOficiales[mapa];
 
-  /// Quién debe jugar; solo tiene sentido en la fase de partida.
-  String get turnoDe => jugadores[_turnoIdx].id;
+  /// Cambia al cambiar de fase y al abrirse o cerrarse una ronda, nunca al
+  /// confirmar o pasar: sirve para programar el plazo común una sola vez.
+  String get claveRonda => '${fase.name}:$rondaId:${faseRonda.name}';
 
   JugadorPartida? jugador(String id) {
     for (final j in jugadores) {
@@ -129,6 +163,51 @@ class PartidaOnline {
   bool hayMovimientosConLosDados(String id) =>
       dados != null &&
       (destinos(id, 0).isNotEmpty || destinos(id, 1).isNotEmpty);
+
+  /// Grupos que [id] completó en la ronda abierta y aún no están liquidados.
+  List<String> pendientesDe(String id) => [
+    for (final e in _completadasRonda.entries)
+      if (e.value.contains(id)) e.key,
+  ]..sort();
+
+  /// Registra los grupos recién completos del tablero de [j]. No se adjudica
+  /// nada aquí: el premio se decide al cerrar la ronda con todas las jugadas.
+  void registrarGruposCompletos(JugadorPartida j) {
+    for (final g in libro.gruposCompletos(j.tablero)) {
+      if (libro.yaReclamo(g, j.id)) continue;
+      (_completadasRonda[g] ??= {}).add(j.id);
+    }
+  }
+
+  /// Liquida lo pendiente: agrupa las finalizaciones por grupo, aplica los
+  /// niveles de premio (con empates compartidos) y suma los puntos.
+  List<Adjudicacion> _liquidar(int ronda) {
+    final adj = libro.liquidar(ronda, _completadasRonda);
+    _completadasRonda.clear();
+    for (final a in adj) {
+      jugador(a.jugador)!.puntos += a.puntos;
+    }
+    liquidacion = adj;
+    if (adj.isNotEmpty) {
+      final texto = [
+        for (final a in adj)
+          '${jugador(a.jugador)!.nombre} '
+              '${a.nivel == 0 ? 'sin premio' : '+${a.puntos} (${a.nivel}.º)'} '
+              'en ${mapaOficial.etiquetaDe(libro.grupo(a.grupo)!)}',
+      ].join('; ');
+      mensaje = '$mensaje Premios: $texto.';
+    }
+    return adj;
+  }
+
+  /// Foto de la ronda para el cliente (sin el plazo, que lo pone la sala).
+  RondaSala ronda({int? segundos}) => RondaSala(
+    id: rondaId,
+    fase: faseRonda,
+    dados: dados == null ? null : List<int>.of(dados!),
+    resoluciones: Map<String, Resolucion>.of(resoluciones),
+    segundos: segundos,
+  );
 
   // ---------------------------------------------------------------------
   // Preparación
@@ -203,23 +282,31 @@ class PartidaOnline {
     for (final j in jugadores) {
       _marcarTerminado(j);
     }
-    final candidatos = [
-      for (var i = 0; i < jugadores.length; i++)
-        if (jugadores[i].estado == EstadoJugador.jugando) i,
-    ];
-    if (candidatos.isEmpty) {
+    rondaId = 1;
+    faseRonda = FaseRonda.esperandoTirada;
+    // La meta queda fijada por los participantes al empezar.
+    meta = metaPara(jugadores.where((j) => j.participa).length);
+    // Grupos que ya nacen completos: se evalúan juntos al acabar la
+    // preparación, sin importar quién confirmó antes; todos empatan en el
+    // primer nivel.
+    for (final j in jugadores) {
+      if (j.participa) registrarGruposCompletos(j);
+    }
+    _liquidar(0);
+    if (!jugadores.any((j) => j.estado == EstadoJugador.jugando)) {
       _terminar(MotivoFin.todosTerminaron);
       return;
     }
-    _turnoIdx = candidatos[_azar.nextInt(candidatos.length)];
-    numTurno = 1;
-    mensaje = '¡Empieza la partida! Juega ${jugadores[_turnoIdx].nombre}.';
+    mensaje =
+        '¡Empieza la partida! Cualquiera puede tirar los dados de la '
+        'ronda 1.';
   }
 
   // ---------------------------------------------------------------------
-  // Turnos
+  // Rondas
 
-  JugadorPartida _jugadorEnTurno(String id) {
+  /// Comprueba lo común a las acciones de ronda y devuelve al jugador.
+  JugadorPartida _paraRonda(String id, int ronda) {
     if (terminada) throw ErrorJuego('La partida ya terminó.');
     final j = jugador(id);
     if (j == null || !j.participa) {
@@ -230,82 +317,152 @@ class PartidaOnline {
         'La partida aún no empezó: coloca tus números iniciales.',
       );
     }
-    if (j.estado == EstadoJugador.terminado) {
-      throw ErrorJuego('Ya terminaste tu tablero.');
+    if (ronda != rondaId) {
+      throw ErrorJuego('Esa ronda ya no está abierta.');
     }
-    if (turnoDe != id) throw ErrorJuego('No es tu turno.');
     return j;
   }
 
-  void tirar(String id) {
-    final j = _jugadorEnTurno(id);
-    if (dados != null) throw ErrorJuego('Ya tiraste los dados.');
-    j.turnosAgotados = 0;
+  /// Lanza los dados compartidos. Solo la primera solicitud válida de la ronda
+  /// genera tirada; una repetida (o simultánea) no cambia nada.
+  void tirar(String id, int ronda) {
+    final j = _paraRonda(id, ronda);
+    if (j.estado != EstadoJugador.jugando) {
+      throw ErrorJuego('Ya no puedes lanzar los dados.');
+    }
+    if (faseRonda == FaseRonda.resolviendo) return; // ya hay tirada
     final d = [_azar.nextInt(6) + 1, _azar.nextInt(6) + 1];
     dados = d;
-    mensaje = hayMovimientosConLosDados(id)
-        ? '${j.nombre} sacó ${d[0]} y ${d[1]}.'
-        : '${j.nombre} sacó ${d[0]} y ${d[1]} y no tiene movimientos.';
+    faseRonda = FaseRonda.resolviendo;
+    resoluciones
+      ..clear()
+      ..addEntries([
+        for (final x in jugadores)
+          if (x.estado == EstadoJugador.jugando)
+            MapEntry(x.id, Resolucion.pendiente),
+      ]);
+    mensaje = '${j.nombre} lanzó los dados: ${d[0]} y ${d[1]}.';
   }
 
-  /// [posAncla] es la posición (0 o 1) del dado que actúa de ancla. La jugada
-  /// se aplica solo al tablero de [id].
-  void colocar(String id, int indice, int posAncla) {
-    final j = _jugadorEnTurno(id);
-    final d = dados;
-    if (d == null) throw ErrorJuego('Tira los dados primero.');
+  /// Valida que [id] tenga la ronda abierta y siga pendiente; devuelve la
+  /// resolución que ya tuviera.
+  Resolucion _resolucionDe(String id) {
+    if (faseRonda != FaseRonda.resolviendo) {
+      throw ErrorJuego('Todavía no se han tirado los dados.');
+    }
+    final r = resoluciones[id];
+    if (r == null) throw ErrorJuego('No participas en esta ronda.');
+    return r;
+  }
+
+  /// Confirma la jugada de [id] en su propio tablero: [posAncla] es la posición
+  /// (0 o 1) del dado ancla. Solo se acepta una resolución por jugador y ronda:
+  /// repetir la confirmación no hace nada y confirmar tras pasar se rechaza.
+  void confirmarJugada(String id, int ronda, int indice, int posAncla) {
+    final j = _paraRonda(id, ronda);
+    final previa = _resolucionDe(id);
+    if (previa == Resolucion.confirmo) return; // mensaje repetido
+    if (previa == Resolucion.paso) {
+      throw ErrorJuego('Ya pasaste esta ronda.');
+    }
+    final d = dados!;
     if (posAncla != 0 && posAncla != 1) throw ErrorJuego('Dado inválido.');
     if (!destinos(id, posAncla).contains(indice)) {
       throw ErrorJuego('Esa casilla no es un destino válido.');
     }
     final numero = d[1 - posAncla];
-    final antes = j.puntos;
     if (!j.controlador!.colocar(indice, numero)) {
       throw ErrorJuego('Ese número no cumple la regla del área.');
     }
-    final ganados = j.puntos - antes;
-    j.turnosAgotados = 0;
-    mensaje = ganados > 0
-        ? '${j.nombre} completó un área y suma $ganados puntos.'
-        : '${j.nombre} colocó un $numero.';
-    dados = null;
-    _marcarTerminado(j);
-    _avanzarTurno();
-    _revisarFin();
+    j.sinRespuestaSeguidas = 0;
+    resoluciones[id] = Resolucion.confirmo;
+    final nuevos = libro
+        .gruposCompletos(j.tablero)
+        .where((g) => !libro.yaReclamo(g, id))
+        .length;
+    registrarGruposCompletos(j);
+    mensaje = nuevos > 0
+        ? '${j.nombre} completó un grupo (el premio se decide al cerrar la '
+              'ronda).'
+        : '${j.nombre} confirmó su jugada.';
+    _revisarRonda();
   }
 
-  /// Solo se puede pasar si los dados no dejan ningún movimiento. Pasar no
-  /// termina el tablero: el jugador sigue participando en los turnos.
-  void pasar(String id) {
-    final j = _jugadorEnTurno(id);
-    if (dados == null) throw ErrorJuego('Tira los dados primero.');
-    if (hayMovimientosConLosDados(id)) {
-      throw ErrorJuego('Tienes movimientos disponibles: no puedes pasar.');
+  /// [id] no coloca nada en esta ronda (se puede aunque haya jugadas). Pasar
+  /// voluntariamente no cuenta como falta de respuesta. Repetirlo no hace nada
+  /// y pasar tras confirmar se rechaza.
+  void pasarRonda(String id, int ronda) {
+    final j = _paraRonda(id, ronda);
+    final previa = _resolucionDe(id);
+    if (previa == Resolucion.paso) return; // mensaje repetido
+    if (previa == Resolucion.confirmo) {
+      throw ErrorJuego('Ya confirmaste tu jugada en esta ronda.');
     }
-    j.turnosAgotados = 0;
-    dados = null;
-    mensaje = '${j.nombre} pasó el turno.';
-    _avanzarTurno();
-    _revisarFin();
+    j.sinRespuestaSeguidas = 0;
+    resoluciones[id] = Resolucion.paso;
+    mensaje = '${j.nombre} pasó la ronda.';
+    _revisarRonda();
   }
 
-  /// Se acabó el tiempo del jugador en turno.
-  void tiempoAgotado() {
-    if (fase != FasePartida.jugando) return;
-    final j = jugadores[_turnoIdx];
-    j.turnosAgotados++;
-    dados = null;
-    if (j.turnosAgotados >= maxTurnosAgotados) {
-      _retirar(
-        j,
+  /// Venció el plazo común: los pendientes quedan sin respuesta (no colocan
+  /// nada) y la ronda se cierra. Tras [maxSinRespuesta] seguidas, abandono.
+  void plazoAgotado() {
+    if (fase != FasePartida.jugando || faseRonda != FaseRonda.resolviendo) {
+      return;
+    }
+    final callaron = [
+      for (final e in resoluciones.entries)
+        if (e.value == Resolucion.pendiente) jugador(e.key)!,
+    ];
+    if (callaron.isEmpty) return;
+    mensaje =
+        'Se agotó el tiempo: ${callaron.map((j) => j.nombre).join(', ')} '
+        'no respondió.';
+    final abandonan = <JugadorPartida>[];
+    for (final j in callaron) {
+      j.sinRespuestaSeguidas++;
+      resoluciones.remove(j.id);
+      if (j.sinRespuestaSeguidas >= maxSinRespuesta) abandonan.add(j);
+    }
+    if (abandonan.isNotEmpty) {
+      _retirarVarios(
+        abandonan,
         EstadoJugador.abandono,
-        'se quedó sin tiempo demasiadas veces',
+        '${abandonan.map((j) => j.nombre).join(' y ')} '
+        '${abandonan.length == 1 ? 'se quedó' : 'se quedaron'} sin responder '
+        'demasiadas rondas.',
       );
     } else {
-      mensaje = 'Se agotó el tiempo de ${j.nombre}.';
-      _avanzarTurno();
-      _revisarFin();
+      _revisarRonda();
     }
+  }
+
+  /// Cierra la ronda abierta (una sola vez) cuando no queda nadie pendiente.
+  void _revisarRonda() {
+    if (fase != FasePartida.jugando || faseRonda != FaseRonda.resolviendo) {
+      return;
+    }
+    if (resoluciones.values.contains(Resolucion.pendiente)) return;
+    // Se evalúa quién terminó su tablero solo al cerrar la ronda.
+    for (final j in jugadores) {
+      _marcarTerminado(j);
+    }
+    final cerrada = rondaId;
+    dados = null;
+    resoluciones.clear();
+    faseRonda = FaseRonda.esperandoTirada;
+    rondaId++;
+    mensaje = '$mensaje Fin de la ronda $cerrada.';
+    // Liquidación con todas las jugadas de la ronda ya conocidas; después se
+    // evalúa la meta con todos los premios de esta ronda adjudicados.
+    _liquidar(cerrada);
+    final alcanzada =
+        meta != null && jugadores.any((j) => j.participa && j.puntos >= meta!);
+    if (alcanzada) {
+      _terminar(MotivoFin.meta);
+      return;
+    }
+    _revisarFin();
   }
 
   // ---------------------------------------------------------------------
@@ -317,7 +474,7 @@ class PartidaOnline {
     if (j == null || !j.participa) {
       throw ErrorJuego('Ya no participas en la partida.');
     }
-    _retirar(j, EstadoJugador.concedio, 'se rindió');
+    _retirarVarios([j], EstadoJugador.concedio, '${j.nombre} se rindió.');
   }
 
   /// El jugador se fue (por ejemplo, no volvió tras desconectarse).
@@ -339,42 +496,39 @@ class PartidaOnline {
         if (jugador(id) case final j? when j.participa) j,
     ];
     if (salen.isEmpty) return;
-    final eraSuTurno =
-        fase == FasePartida.jugando && salen.contains(jugadores[_turnoIdx]);
-    for (final j in salen) {
-      j.estado = EstadoJugador.abandono;
-    }
-    mensaje = salen.length == 1
-        ? '${salen.single.nombre} $motivo.'
-        : '${salen.map((j) => j.nombre).join(' y ')} $motivoPlural.';
-    if (eraSuTurno) {
-      dados = null;
-      _avanzarTurno();
-    }
-    _revisarFin(retiro: MotivoFin.abandono);
+    _retirarVarios(
+      salen,
+      EstadoJugador.abandono,
+      salen.length == 1
+          ? '${salen.single.nombre} $motivo.'
+          : '${salen.map((j) => j.nombre).join(' y ')} $motivoPlural.',
+    );
   }
 
-  void _retirar(JugadorPartida j, EstadoJugador estado, String texto) {
-    final eraSuTurno = fase == FasePartida.jugando && jugadores[_turnoIdx] == j;
-    j.estado = estado;
-    mensaje = '${j.nombre} $texto.';
-    if (eraSuTurno) {
-      dados = null;
-      _avanzarTurno();
+  void _retirarVarios(
+    List<JugadorPartida> salen,
+    EstadoJugador estado,
+    String texto,
+  ) {
+    for (final j in salen) {
+      j.estado = estado;
+      resoluciones.remove(j.id); // ya no se espera su respuesta
     }
+    mensaje = texto;
     _revisarFin(
       retiro: estado == EstadoJugador.concedio
           ? MotivoFin.rendicion
           : MotivoFin.abandono,
     );
+    _revisarRonda();
   }
 
   // ---------------------------------------------------------------------
   // Fin de la preparación y de la partida
 
   /// Un jugador que llenó su tablero o ya no tiene ninguna jugada legal (con
-  /// ninguna pareja de dados) queda como terminado: se salta su turno pero
-  /// sigue siendo candidato a ganar.
+  /// ninguna pareja de dados) queda como terminado: deja de participar en las
+  /// rondas pero **conserva sus puntos y sigue siendo candidato a ganar**.
   void _marcarTerminado(JugadorPartida j) {
     if (j.estado != EstadoJugador.jugando || j.quedanMovimientos) return;
     j.estado = EstadoJugador.terminado;
@@ -382,22 +536,6 @@ class PartidaOnline {
     mensaje =
         '$mensaje ${j.nombre} ${lleno ? 'completó' : 'no puede seguir en'} '
         'su tablero.';
-  }
-
-  /// Pasa el turno al siguiente jugador que aún juega; si no queda ninguno,
-  /// deja el turno como está (el fin lo decide [_revisarFin]). Antes de dar el
-  /// turno comprueba que cada jugador tenga alguna jugada posible: si no,
-  /// queda como terminado y se salta.
-  void _avanzarTurno() {
-    jugadores.forEach(_marcarTerminado);
-    for (var paso = 1; paso <= jugadores.length; paso++) {
-      final i = (_turnoIdx + paso) % jugadores.length;
-      if (jugadores[i].estado == EstadoJugador.jugando) {
-        _turnoIdx = i;
-        numTurno++;
-        return;
-      }
-    }
   }
 
   /// Decide si la preparación acaba, si empieza la partida o si esta termina.
@@ -415,11 +553,15 @@ class PartidaOnline {
   }
 
   void _terminar(MotivoFin motivo) {
+    // Lo que se completó en una ronda cortada (rendición o abandono) también
+    // se liquida antes de dar el resultado.
+    if (_completadasRonda.isNotEmpty) _liquidar(rondaId);
     fase = FasePartida.terminada;
     dados = null;
+    resoluciones.clear();
     final elegibles = jugadores.where((j) => j.participa).toList();
     List<String> ganadores;
-    if (motivo == MotivoFin.todosTerminaron) {
+    if (motivo == MotivoFin.todosTerminaron || motivo == MotivoFin.meta) {
       final mejor = elegibles.fold<int>(0, (m, j) => max(m, j.puntos));
       ganadores = [
         for (final j in elegibles)
@@ -433,6 +575,7 @@ class PartidaOnline {
     resultado = ResultadoPartida(ganadores: ganadores, motivo: motivo);
     final nombres = [for (final id in ganadores) jugador(id)!.nombre];
     final base = switch (motivo) {
+      MotivoFin.meta => 'Se alcanzó la meta de $meta puntos.',
       MotivoFin.todosTerminaron => 'Todos terminaron su tablero.',
       MotivoFin.rendicion => mensaje,
       MotivoFin.abandono => mensaje,

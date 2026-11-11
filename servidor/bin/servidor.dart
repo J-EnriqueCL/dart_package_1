@@ -33,7 +33,11 @@ Future<void> main() async {
   const base = ConfigSalas();
   final gestor = GestorSalas(
     config: ConfigSalas(
-      tiempoTurno: _segundosDeEntorno('TIEMPO_TURNO', base.tiempoTurno),
+      // TIEMPO_TURNO es el nombre antiguo de TIEMPO_RONDA (que tiene prioridad).
+      tiempoRonda: _segundosDeEntorno(
+        'TIEMPO_RONDA',
+        _segundosDeEntorno('TIEMPO_TURNO', base.tiempoRonda),
+      ),
       graciaPartida: _segundosDeEntorno(
         'GRACIA_RECONEXION',
         base.graciaPartida,

@@ -141,31 +141,61 @@ JugadorSala jugadorSala(
   graciaRestante: gracia,
 );
 
+/// Estado de sala para las pruebas. En la fase `jugando` se construye la
+/// ronda: sin [dados] está esperando tirada y con [dados] está resolviendo (por
+/// defecto todos los que siguen jugando están pendientes; [resoluciones] lo
+/// cambia).
 EstadoSala estadoSala({
   String yo = 'a',
   FaseSala fase = FaseSala.lobby,
   List<JugadorSala>? jugadores,
   String anfitrion = 'a',
-  String? turnoDe,
-  int turno = 1,
+  int ronda = 1,
   List<int>? dados,
+  Map<String, Resolucion>? resoluciones,
+  int? segundos,
   List<int?>? tablero,
   int mapa = 0,
   String mensaje = '',
   ResultadoPartida? resultado,
-}) => EstadoSala(
-  yo: yo,
-  codigo: 'ABC234',
-  fase: fase,
-  mapa: mapa,
-  maxJugadores: 4,
-  anfitrion: anfitrion,
-  jugadores: jugadores ?? [jugadorSala('a'), jugadorSala('b')],
-  turnoDe: turnoDe,
-  turno: turno,
-  dados: dados,
-  tablero: tablero ?? (fase == FaseSala.lobby ? const [] : tableroInicial()),
-  mensaje: mensaje,
-  segundosTurno: fase == FaseSala.jugando ? 45 : null,
-  resultado: resultado,
-);
+  int? meta,
+  List<ReclamacionGrupo> reclamaciones = const [],
+  List<String> misPendientes = const [],
+  List<Adjudicacion> liquidacion = const [],
+}) {
+  final js = jugadores ?? [jugadorSala('a'), jugadorSala('b')];
+  return EstadoSala(
+    yo: yo,
+    codigo: 'ABC234',
+    fase: fase,
+    mapa: mapa,
+    maxJugadores: 5,
+    anfitrion: anfitrion,
+    jugadores: js,
+    meta: meta ?? (fase == FaseSala.lobby ? null : metaPara(js.length)),
+    reclamaciones: reclamaciones,
+    misPendientes: misPendientes,
+    liquidacion: liquidacion,
+    ronda: fase == FaseSala.jugando
+        ? RondaSala(
+            id: ronda,
+            fase: dados == null
+                ? FaseRonda.esperandoTirada
+                : FaseRonda.resolviendo,
+            dados: dados,
+            resoluciones: dados == null
+                ? const {}
+                : resoluciones ??
+                      {
+                        for (final j in js)
+                          if (j.estado == EstadoJugador.jugando)
+                            j.id: Resolucion.pendiente,
+                      },
+            segundos: dados == null ? null : (segundos ?? 45),
+          )
+        : null,
+    tablero: tablero ?? (fase == FaseSala.lobby ? const [] : tableroInicial()),
+    mensaje: mensaje,
+    resultado: resultado,
+  );
+}

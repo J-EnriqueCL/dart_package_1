@@ -123,7 +123,7 @@ void main() {
       );
       expect(copia.fase, FaseSala.preparacion);
       expect(copia.numerosPorColocar, [1, 2, 3, 5, 6]);
-      expect(copia.esMiTurno, isFalse);
+      expect(copia.puedoTirar, isFalse);
     });
   });
 

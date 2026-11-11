@@ -12,8 +12,10 @@ import 'cliente_multijugador.dart';
 
 /// Partida en curso (o ya terminada) vista por un jugador.
 ///
-/// El tablero y los dados son los del servidor; aquí solo se elige el ancla
-/// (algo local) y se piden acciones. Todo lo que se muestra sale de [sala].
+/// Los dados son compartidos y los pone el servidor. Aquí solo se elige, como
+/// previsualización local, el ancla y la casilla; el tablero y la puntuación
+/// solo cambian cuando el servidor acepta "Confirmar jugada". Todo lo que se
+/// muestra sale de [sala].
 class VistaPartidaOnline extends StatefulWidget {
   const VistaPartidaOnline({
     super.key,
@@ -31,6 +33,7 @@ class VistaPartidaOnline extends StatefulWidget {
 class _VistaPartidaOnlineState extends State<VistaPartidaOnline> {
   late ControladorPartida _ctl;
   int? _ancla;
+  int? _destino;
   String? _clave;
   Timer? _reloj;
 
@@ -61,13 +64,17 @@ class _VistaPartidaOnlineState extends State<VistaPartidaOnline> {
 
   void _preparar() {
     _ctl = _sala.crearControlador();
-    // La elección de ancla solo vale para esta tirada.
-    final clave = '${_sala.turno}|${_sala.dados}|${_sala.turnoDe}';
+    // La previsualización solo vale para esta ronda y mientras esté pendiente:
+    // al resolver (o al reconectar con la ronda ya resuelta) se descarta.
+    final clave = '${_ronda?.id}|${_ronda?.dados}|${_sala.miResolucion}';
     if (clave != _clave) {
       _ancla = null;
+      _destino = null;
       _clave = clave;
     }
   }
+
+  RondaSala? get _ronda => _sala.ronda;
 
   int? _restante(int? base) {
     if (base == null) return null;
@@ -80,7 +87,7 @@ class _VistaPartidaOnlineState extends State<VistaPartidaOnline> {
   bool get _activo => _sala.miJugador?.participa ?? false;
   bool get _yaTermine => _sala.miJugador?.estado == EstadoJugador.terminado;
   bool get _jugando => _sala.fase == FaseSala.jugando;
-  bool get _puedoActuar => _sala.esMiTurno && _activo && !_cliente.esperando;
+  bool get _puedoActuar => _sala.estoyPendiente && !_cliente.esperando;
 
   List<bool> get _movimientosPorDado {
     final d = _sala.dados;
@@ -94,19 +101,40 @@ class _VistaPartidaOnlineState extends State<VistaPartidaOnline> {
   Set<int> get _destinos {
     final d = _sala.dados;
     final a = _ancla;
-    if (d == null || a == null || !_sala.esMiTurno) return {};
+    if (d == null || a == null || !_sala.estoyPendiente) return {};
     return _ctl.destinosPosibles(ancla: d[a], colocar: d[1 - a]);
   }
 
   void _tocarDado(int posicion) {
     if (!_puedoActuar || _sala.dados == null) return;
-    setState(() => _ancla = _ancla == posicion ? null : posicion);
+    setState(() {
+      _ancla = _ancla == posicion ? null : posicion;
+      _destino = null;
+    });
   }
 
-  void _colocar(int indice) {
+  /// Elegir una casilla es solo una previsualización: no se envía nada.
+  void _elegirDestino(int indice) {
+    if (!_puedoActuar || !_destinos.contains(indice)) return;
+    setState(() => _destino = _destino == indice ? null : indice);
+  }
+
+  void _tirar() {
+    final r = _ronda;
+    if (r != null) _cliente.tirar(r.id);
+  }
+
+  void _confirmarJugada() {
+    final r = _ronda;
     final a = _ancla;
-    if (a == null || !_puedoActuar) return;
-    _cliente.colocar(indice, a);
+    final d = _destino;
+    if (r == null || a == null || d == null || !_puedoActuar) return;
+    _cliente.confirmarJugada(r.id, d, a);
+  }
+
+  void _pasarRonda() {
+    final r = _ronda;
+    if (r != null && _puedoActuar) _cliente.pasarRonda(r.id);
   }
 
   Future<void> _rendirse() async {
@@ -214,7 +242,26 @@ class _VistaPartidaOnlineState extends State<VistaPartidaOnline> {
             ),
           ),
           const Spacer(),
-          Pastilla(icono: Icons.flag_rounded, texto: 'Turno ${_sala.turno}'),
+          if (_ronda != null)
+            KeyedSubtree(
+              key: const Key('numero_ronda'),
+              child: Pastilla(
+                icono: Icons.flag_rounded,
+                texto: 'Ronda ${_ronda!.id}',
+              ),
+            ),
+          if (_sala.meta != null)
+            Padding(
+              padding: const EdgeInsets.only(left: 6),
+              child: KeyedSubtree(
+                key: const Key('meta_partida'),
+                child: Pastilla(
+                  icono: Icons.emoji_events_rounded,
+                  texto: '${_sala.miJugador?.puntos ?? 0} / ${_sala.meta}',
+                  destacado: true,
+                ),
+              ),
+            ),
           PopupMenuButton<String>(
             key: const Key('menu_partida'),
             icon: const Icon(Icons.more_vert_rounded, color: Colors.white),
@@ -251,8 +298,7 @@ class _VistaPartidaOnlineState extends State<VistaPartidaOnline> {
                   key: Key('jugador_${j.id}'),
                   jugador: j,
                   esYo: j.id == _sala.yo,
-                  enTurno: _jugando && _sala.turnoDe == j.id,
-                  segundosTurno: _restante(_sala.segundosTurno),
+                  resolucion: _jugando ? _ronda?.resoluciones[j.id] : null,
                   segundosGracia: _restante(j.graciaRestante),
                 ),
               ),
@@ -262,44 +308,231 @@ class _VistaPartidaOnlineState extends State<VistaPartidaOnline> {
     );
   }
 
+  String _nombreGrupo(String id) {
+    final g = _sala.mapaOficial.gruposPremio.where((x) => x.id == id);
+    return g.isEmpty ? id : _sala.mapaOficial.etiquetaDe(g.first);
+  }
+
+  String _nombreJugador(String id) =>
+      id == _sala.yo ? 'Tú' : (_sala.jugador(id)?.nombre ?? id);
+
+  /// Banda compacta con un chip por grupo de premio: el color del grupo y el
+  /// próximo premio disponible (0 si ya se agotaron). Un ✓ indica que ya lo
+  /// completé y un reloj que lo completé en esta ronda y falta liquidarlo.
+  Widget _bandaPremios() {
+    final grupos = _sala.mapaOficial.gruposPremio;
+    if (grupos.isEmpty || _sala.meta == null) return const SizedBox.shrink();
+    final tablero = _sala.mapaOficial.crearTablero();
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(9, 2, 9, 0),
+      child: InkWell(
+        key: const Key('banda_premios'),
+        borderRadius: BorderRadius.circular(8),
+        onTap: _mostrarPremios,
+        child: Wrap(
+          alignment: WrapAlignment.center,
+          spacing: 3,
+          runSpacing: 3,
+          children: [
+            for (final g in grupos)
+              _ChipPremio(
+                key: Key('premio_${g.id}'),
+                color: Tema.color(tablero[g.casillas.first].region),
+                textoColor: Tema.colorTexto(tablero[g.casillas.first].region),
+                siguiente: _siguientePremio(g),
+                agotado: _sala.reclamacionDe(g.id).niveles.length >= g.niveles,
+                completado: _yaCobre(g.id),
+                pendiente: _sala.misPendientes.contains(g.id),
+              ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  int _siguientePremio(GrupoPremio g) {
+    final usados = _sala.reclamacionDe(g.id).niveles.length;
+    return usados < g.niveles ? g.premios[usados] : 0;
+  }
+
+  /// ¿Ya completé este grupo en una ronda liquidada (con o sin premio)?
+  bool _yaCobre(String id) {
+    final r = _sala.reclamacionDe(id);
+    return r.niveles.any((n) => n.contains(_sala.yo)) ||
+        r.sinPremio.contains(_sala.yo);
+  }
+
+  void _mostrarPremios() {
+    final tablero = _sala.mapaOficial.crearTablero();
+    showModalBottomSheet<void>(
+      context: context,
+      isScrollControlled: true,
+      backgroundColor: Tema.panel,
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(top: Radius.circular(24)),
+      ),
+      builder: (context) => SafeArea(
+        child: ConstrainedBox(
+          constraints: BoxConstraints(
+            maxHeight: MediaQuery.sizeOf(context).height * 0.8,
+          ),
+          child: ListView(
+            key: const Key('hoja_premios'),
+            padding: const EdgeInsets.all(16),
+            shrinkWrap: true,
+            children: [
+              const Text(
+                'Premios por grupo',
+                style: TextStyle(
+                  color: Colors.white,
+                  fontSize: 20,
+                  fontWeight: FontWeight.w800,
+                ),
+              ),
+              const SizedBox(height: 4),
+              const Text(
+                'Quien completa un grupo antes se lleva más. Los que lo '
+                'completan en la misma ronda comparten el nivel. Los puntos se '
+                'adjudican al cerrar la ronda.',
+                style: TextStyle(color: Colors.white70, fontSize: 12),
+              ),
+              const SizedBox(height: 10),
+              for (final g in _sala.mapaOficial.gruposPremio)
+                _filaPremio(g, tablero),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+
+  Widget _filaPremio(GrupoPremio g, List<Celda> tablero) {
+    final r = _sala.reclamacionDe(g.id);
+    final region = tablero[g.casillas.first].region;
+    final partes = <String>[];
+    for (var n = 0; n < g.niveles; n++) {
+      final quien = n < r.niveles.length
+          ? r.niveles[n].map(_nombreJugador).join(' y ')
+          : 'libre';
+      partes.add('${n + 1}.º ${g.premios[n]} pts: $quien');
+    }
+    if (r.sinPremio.isNotEmpty) {
+      partes.add('sin premio: ${r.sinPremio.map(_nombreJugador).join(', ')}');
+    }
+    return Container(
+      margin: const EdgeInsets.only(bottom: 6),
+      padding: const EdgeInsets.all(8),
+      decoration: BoxDecoration(
+        color: Colors.white.withValues(alpha: 0.07),
+        borderRadius: BorderRadius.circular(10),
+      ),
+      child: Row(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Container(
+            width: 16,
+            height: 16,
+            margin: const EdgeInsets.only(top: 2, right: 8),
+            decoration: BoxDecoration(
+              color: Tema.color(region),
+              borderRadius: BorderRadius.circular(4),
+            ),
+          ),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  '${_nombreGrupo(g.id)} · ${g.casillas.length} casillas'
+                  '${_sala.misPendientes.contains(g.id) ? ' · por liquidar' : ''}',
+                  style: const TextStyle(
+                    color: Colors.white,
+                    fontWeight: FontWeight.w700,
+                    fontSize: 13,
+                  ),
+                ),
+                Text(
+                  partes.join('  ·  '),
+                  key: Key('detalle_${g.id}'),
+                  style: const TextStyle(color: Colors.white70, fontSize: 12),
+                ),
+              ],
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  /// Resultado de la última liquidación (al cerrar la ronda).
+  String get _textoLiquidacion {
+    final adj = _sala.liquidacion;
+    if (adj.isEmpty) return '';
+    final ronda = adj.first.ronda;
+    final partes = [
+      for (final a in adj)
+        '${_nombreJugador(a.jugador)} '
+            '${a.nivel == 0 ? 'sin premio' : '+${a.puntos} (${a.nivel}.º)'} '
+            'en ${_nombreGrupo(a.grupo)}',
+    ];
+    return ronda == 0
+        ? 'Premios iniciales: ${partes.join(' · ')}'
+        : 'Premios de la ronda $ronda: ${partes.join(' · ')}';
+  }
+
+  /// Nombres de quienes aún deben resolver la ronda abierta.
+  String get _pendientes => [
+    for (final id in _ronda?.pendientes ?? const <String>[])
+      if (_sala.jugador(id) case final j?) j.id == _sala.yo ? 'Tú' : j.nombre,
+  ].join(', ');
+
   String _textoEstado(bool hayMovimientos, Set<int> destinos) {
+    final r = _ronda;
     if (!_activo) {
       return 'Ya no participas. Puedes seguir mirando la partida.';
     }
     if (_yaTermine) {
       return 'Terminaste tu tablero. Esperando a que acaben los demás.';
     }
-    if (!_sala.esMiTurno) {
-      final quien = _sala.jugador(_sala.turnoDe ?? '')?.nombre ?? '';
-      return 'Turno de $quien.';
+    if (r == null) return '';
+    if (r.fase == FaseRonda.esperandoTirada) {
+      return 'Esperando tirada. Cualquiera puede lanzar los dados.';
     }
-    final d = _sala.dados;
-    if (d == null) return 'Es tu turno. Tira los dados.';
+    if (!_sala.estoyPendiente) return 'Esperando a los demás';
+    final d = r.dados!;
     final a = _ancla;
     if (a == null) {
       return hayMovimientos
-          ? 'Salieron ${d[0]} y ${d[1]}. Toca un dado para elegirlo como ancla.'
-          : 'Salieron ${d[0]} y ${d[1]}, pero no hay movimientos. Pasa el turno.';
+          ? 'Salieron ${d[0]} y ${d[1]}. Elige un dado como ancla o pasa la ronda.'
+          : 'Salieron ${d[0]} y ${d[1]}. No tienes jugadas con estos dados: pasa la ronda.';
     }
-    return destinos.isEmpty
-        ? 'No hay lugar para el ${d[1 - a]} junto a un ${d[a]}. Elige el otro dado.'
-        : 'Ancla ${d[a]}. Coloca el ${d[1 - a]} en una casilla iluminada.';
+    if (destinos.isEmpty) {
+      return 'No hay lugar para el ${d[1 - a]} junto a un ${d[a]}. Elige el otro dado.';
+    }
+    if (_destino == null) {
+      return 'Ancla ${d[a]}. Elige una casilla iluminada para el ${d[1 - a]}.';
+    }
+    return 'Pulsa "Confirmar jugada" para colocar el ${d[1 - a]}.';
   }
 
   Widget _panelInferior(bool hayMovimientos, Set<int> destinos) {
+    final r = _ronda;
     final dados = _sala.dados;
     final movimientos = _movimientosPorDado;
-    final miTurno = _sala.esMiTurno && _activo;
+    final pendiente = _sala.estoyPendiente;
+    final segundos = _restante(r?.segundos);
+    final pendientes = _pendientes;
 
     RolDado rol(int posicion) {
-      if (_ancla == null || !miTurno) return RolDado.ninguno;
+      if (_ancla == null || !pendiente) return RolDado.ninguno;
       return _ancla == posicion ? RolDado.ancla : RolDado.aColocar;
     }
 
     // En pantallas bajas el panel se compacta para que el tablero conserve
     // casillas de tamaño táctil razonable.
     final compacto = MediaQuery.sizeOf(context).height < 700;
-    final vertical = compacto ? 8.0 : 14.0;
+    final vertical = compacto ? 5.0 : 14.0;
+    final relleno = EdgeInsets.symmetric(vertical: compacto ? 10 : 14);
 
     return Container(
       width: double.infinity,
@@ -328,6 +561,67 @@ class _VistaPartidaOnlineState extends State<VistaPartidaOnline> {
               fontWeight: FontWeight.w600,
             ),
           ),
+          if (segundos != null || pendientes.isNotEmpty)
+            Padding(
+              padding: const EdgeInsets.only(top: 2),
+              child: Row(
+                mainAxisAlignment: MainAxisAlignment.center,
+                children: [
+                  if (segundos != null)
+                    Text(
+                      'Tiempo de la ronda: ${segundos}s',
+                      key: const Key('tiempo_ronda'),
+                      style: TextStyle(
+                        color: segundos <= 10 ? Colors.redAccent : Tema.dorado,
+                        fontSize: 13,
+                        fontWeight: FontWeight.w800,
+                      ),
+                    ),
+                  if (segundos != null && pendientes.isNotEmpty)
+                    const SizedBox(width: 10),
+                  if (pendientes.isNotEmpty)
+                    Flexible(
+                      child: Text(
+                        'Pendientes: $pendientes',
+                        key: const Key('pendientes_ronda'),
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                        style: const TextStyle(
+                          color: Colors.white70,
+                          fontSize: 12,
+                        ),
+                      ),
+                    ),
+                ],
+              ),
+            ),
+          if (_sala.misPendientes.isNotEmpty)
+            Padding(
+              padding: const EdgeInsets.only(top: 2),
+              child: Text(
+                'Completaste: ${_sala.misPendientes.map(_nombreGrupo).join(', ')} '
+                '(se premia al cerrar la ronda)',
+                key: const Key('pendiente_liquidar'),
+                textAlign: TextAlign.center,
+                maxLines: compacto ? 1 : 2,
+                overflow: TextOverflow.ellipsis,
+                style: const TextStyle(color: Tema.dorado, fontSize: 12),
+              ),
+            ),
+          if (_textoLiquidacion.isNotEmpty &&
+              r != null &&
+              r.fase == FaseRonda.esperandoTirada)
+            Padding(
+              padding: const EdgeInsets.only(top: 2),
+              child: Text(
+                _textoLiquidacion,
+                key: const Key('liquidacion_ronda'),
+                textAlign: TextAlign.center,
+                maxLines: compacto ? 2 : 3,
+                overflow: TextOverflow.ellipsis,
+                style: const TextStyle(color: Colors.greenAccent, fontSize: 12),
+              ),
+            ),
           if (_sala.mensaje.isNotEmpty)
             Padding(
               padding: const EdgeInsets.only(top: 2),
@@ -347,12 +641,12 @@ class _VistaPartidaOnlineState extends State<VistaPartidaOnline> {
               for (var posicion = 0; posicion < 2; posicion++) ...[
                 if (posicion == 1) const SizedBox(width: 18),
                 Dado(
-                  tamano: compacto ? 58 : 92,
+                  tamano: compacto ? 50 : 92,
                   key: Key('dado_$posicion'),
                   valor: dados?[posicion],
                   rol: rol(posicion),
-                  activo: dados == null || movimientos[posicion] || !miTurno,
-                  onTap: miTurno && dados != null
+                  activo: dados == null || movimientos[posicion] || !pendiente,
+                  onTap: pendiente && dados != null
                       ? () => _tocarDado(posicion)
                       : null,
                 ),
@@ -360,41 +654,58 @@ class _VistaPartidaOnlineState extends State<VistaPartidaOnline> {
             ],
           ),
           SizedBox(height: vertical),
-          Row(
-            children: [
-              Expanded(
-                child: FilledButton.icon(
-                  key: const Key('boton_tirar_dados'),
-                  onPressed: _puedoActuar && dados == null
-                      ? _cliente.tirar
-                      : null,
-                  icon: const Icon(Icons.casino_rounded),
-                  label: const Text('Tirar dados'),
-                  style: FilledButton.styleFrom(
-                    backgroundColor: Tema.dorado,
-                    foregroundColor: Tema.tinta,
-                    padding: EdgeInsets.symmetric(vertical: compacto ? 10 : 14),
-                  ),
+          if (r != null && r.fase == FaseRonda.esperandoTirada)
+            SizedBox(
+              width: double.infinity,
+              child: FilledButton.icon(
+                key: const Key('boton_tirar_dados'),
+                onPressed: _sala.puedoTirar && !_cliente.esperando
+                    ? _tirar
+                    : null,
+                icon: const Icon(Icons.casino_rounded),
+                label: const Text('Tirar dados'),
+                style: FilledButton.styleFrom(
+                  backgroundColor: Tema.dorado,
+                  foregroundColor: Tema.tinta,
+                  padding: relleno,
                 ),
               ),
-              const SizedBox(width: 12),
-              Expanded(
-                child: OutlinedButton.icon(
-                  key: const Key('boton_pasar_turno'),
-                  // El servidor solo deja pasar si no hay movimientos.
-                  onPressed: _puedoActuar && dados != null && !hayMovimientos
-                      ? _cliente.pasar
-                      : null,
-                  icon: const Icon(Icons.skip_next_rounded),
-                  label: const Text('Pasar turno'),
-                  style: OutlinedButton.styleFrom(
-                    foregroundColor: Colors.white,
-                    padding: EdgeInsets.symmetric(vertical: compacto ? 10 : 14),
+            )
+          else if (pendiente)
+            Row(
+              children: [
+                Expanded(
+                  child: FilledButton.icon(
+                    key: const Key('boton_confirmar_jugada'),
+                    onPressed:
+                        _puedoActuar && _ancla != null && _destino != null
+                        ? _confirmarJugada
+                        : null,
+                    icon: const Icon(Icons.check_rounded),
+                    label: const Text('Confirmar jugada'),
+                    style: FilledButton.styleFrom(
+                      backgroundColor: Tema.dorado,
+                      foregroundColor: Tema.tinta,
+                      padding: relleno,
+                    ),
                   ),
                 ),
-              ),
-            ],
-          ),
+                const SizedBox(width: 12),
+                Expanded(
+                  child: OutlinedButton.icon(
+                    key: const Key('boton_pasar_ronda'),
+                    // Se puede pasar siempre, aunque haya jugadas.
+                    onPressed: _puedoActuar ? _pasarRonda : null,
+                    icon: const Icon(Icons.skip_next_rounded),
+                    label: const Text('Pasar esta ronda'),
+                    style: OutlinedButton.styleFrom(
+                      foregroundColor: Colors.white,
+                      padding: relleno,
+                    ),
+                  ),
+                ),
+              ],
+            ),
         ],
       ),
     );
@@ -444,6 +755,12 @@ class _VistaPartidaOnlineState extends State<VistaPartidaOnline> {
             ),
           ),
           const SizedBox(height: 4),
+          if (_sala.meta != null)
+            Text(
+              'Meta: ${_sala.meta} puntos',
+              key: const Key('meta_resultado'),
+              style: const TextStyle(color: Tema.dorado, fontSize: 13),
+            ),
           Text(
             _sala.mensaje,
             textAlign: TextAlign.center,
@@ -543,13 +860,16 @@ class _VistaPartidaOnlineState extends State<VistaPartidaOnline> {
     final matriz = _ctl.matriz;
     final d = _sala.dados;
     final a = _ancla;
-    final numeroAncla = d != null && a != null ? d[a] : null;
+    final numeroAncla = d != null && a != null && _sala.estoyPendiente
+        ? d[a]
+        : null;
     final porColocar = d != null && a != null ? d[1 - a] : null;
 
     return Column(
       children: [
         _encabezado(),
         _jugadores(),
+        _bandaPremios(),
         Expanded(
           child: Padding(
             padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
@@ -563,12 +883,14 @@ class _VistaPartidaOnlineState extends State<VistaPartidaOnline> {
                     vistaPrevia: porColocar,
                     esInicial: matriz[i].esInicial,
                     esDestino: destinos.contains(i),
+                    // La casilla elegida es solo una previsualización.
+                    seleccionada: i == _destino,
                     esAncla:
-                        numeroAncla != null &&
-                        _sala.esMiTurno &&
-                        matriz[i].valor == numeroAncla,
+                        numeroAncla != null && matriz[i].valor == numeroAncla,
                     completada: _ctl.areaCompleta(_ctl.areaDeCelda(i)),
-                    onTap: destinos.contains(i) ? () => _colocar(i) : null,
+                    onTap: destinos.contains(i)
+                        ? () => _elegirDestino(i)
+                        : null,
                   ),
               ],
             ),
@@ -588,15 +910,15 @@ class _FichaJugador extends StatelessWidget {
     super.key,
     required this.jugador,
     required this.esYo,
-    required this.enTurno,
-    required this.segundosTurno,
+    required this.resolucion,
     required this.segundosGracia,
   });
 
   final JugadorSala jugador;
   final bool esYo;
-  final bool enTurno;
-  final int? segundosTurno;
+
+  /// Cómo va en la ronda abierta; null si no participa en ella.
+  final Resolucion? resolucion;
   final int? segundosGracia;
 
   @override
@@ -612,9 +934,14 @@ class _FichaJugador extends StatelessWidget {
     } else if (jugador.estado == EstadoJugador.terminado) {
       estado = 'Terminado';
       colorEstado = Colors.greenAccent;
-    } else if (enTurno) {
-      estado = segundosTurno == null ? 'Su turno' : 'Turno · ${segundosTurno}s';
+    } else if (resolucion == Resolucion.pendiente) {
+      estado = 'Pendiente';
       colorEstado = Tema.dorado;
+    } else if (resolucion == Resolucion.confirmo) {
+      estado = 'Jugó';
+      colorEstado = Colors.greenAccent;
+    } else if (resolucion == Resolucion.paso) {
+      estado = 'Pasó';
     }
     if (!fuera && !jugador.conectado) {
       final sin = segundosGracia == null
@@ -623,14 +950,15 @@ class _FichaJugador extends StatelessWidget {
       estado = estado.isEmpty ? sin : '$estado · $sin';
       colorEstado = Colors.redAccent;
     }
+    final pendiente = resolucion == Resolucion.pendiente;
 
     return Container(
       padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 6),
       decoration: BoxDecoration(
-        color: Colors.white.withValues(alpha: enTurno ? 0.14 : 0.07),
+        color: Colors.white.withValues(alpha: pendiente ? 0.14 : 0.07),
         borderRadius: BorderRadius.circular(12),
         border: Border.all(
-          color: enTurno ? Tema.dorado : Colors.transparent,
+          color: pendiente ? Tema.dorado : Colors.transparent,
           width: 2,
         ),
       ),
@@ -669,6 +997,58 @@ class _FichaJugador extends StatelessWidget {
               ),
             ),
           ],
+        ),
+      ),
+    );
+  }
+}
+
+class _ChipPremio extends StatelessWidget {
+  const _ChipPremio({
+    super.key,
+    required this.color,
+    required this.textoColor,
+    required this.siguiente,
+    required this.agotado,
+    required this.completado,
+    required this.pendiente,
+  });
+
+  final Color color;
+  final Color textoColor;
+  final int siguiente;
+  final bool agotado;
+  final bool completado;
+  final bool pendiente;
+
+  @override
+  Widget build(BuildContext context) {
+    return Opacity(
+      opacity: agotado ? 0.4 : 1,
+      child: Container(
+        width: 28,
+        height: 18,
+        alignment: Alignment.center,
+        decoration: BoxDecoration(
+          color: color,
+          borderRadius: BorderRadius.circular(6),
+          border: Border.all(
+            color: pendiente
+                ? Tema.dorado
+                : completado
+                ? Colors.white
+                : Colors.transparent,
+            width: 2,
+          ),
+        ),
+        child: Text(
+          pendiente ? '⏳' : (completado ? '✓' : '$siguiente'),
+          style: TextStyle(
+            color: textoColor,
+            fontSize: 11,
+            fontWeight: FontWeight.w900,
+            decoration: agotado ? TextDecoration.lineThrough : null,
+          ),
         ),
       ),
     );

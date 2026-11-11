@@ -397,10 +397,21 @@ class ClienteMultijugador extends ChangeNotifier {
       _accion({'tipo': MsgCliente.quitarInicial, 'indice': indice});
   bool confirmarDistribucion() =>
       _accion({'tipo': MsgCliente.confirmarDistribucion});
-  bool tirar() => _accion({'tipo': MsgCliente.tirar});
-  bool colocar(int indice, int ancla) =>
-      _accion({'tipo': MsgCliente.colocar, 'indice': indice, 'ancla': ancla});
-  bool pasar() => _accion({'tipo': MsgCliente.pasar});
+
+  /// Pide lanzar los dados de la ronda [ronda]. El servidor los sortea.
+  bool tirar(int ronda) => _accion({'tipo': MsgCliente.tirar, 'ronda': ronda});
+
+  /// Confirma la jugada de la ronda [ronda] (envío y aplicación definitivos).
+  bool confirmarJugada(int ronda, int indice, int ancla) => _accion({
+    'tipo': MsgCliente.confirmarJugada,
+    'ronda': ronda,
+    'indice': indice,
+    'ancla': ancla,
+  });
+
+  /// No colocar nada en la ronda [ronda].
+  bool pasarRonda(int ronda) =>
+      _accion({'tipo': MsgCliente.pasarRonda, 'ronda': ronda});
   bool conceder() => _accion({'tipo': MsgCliente.conceder});
   bool volverAlLobby() => _accion({'tipo': MsgCliente.volverAlLobby});
   bool salirSala() {

@@ -109,9 +109,9 @@ void main() {
 
       final a = conectar()..enviar({'tipo': MsgCliente.auth, 'token': ta});
       await a.tipo(MsgServidor.sinSala);
-      a.enviar({'tipo': MsgCliente.crearSala, 'mapa': 1});
+      a.enviar({'tipo': MsgCliente.crearSala, 'mapa': 0});
       final sala = await a.estado((e) => e.fase == FaseSala.lobby);
-      expect(sala.mapa, 1);
+      expect(sala.mapa, 0);
 
       final b = conectar()..enviar({'tipo': MsgCliente.auth, 'token': tb});
       await b.tipo(MsgServidor.sinSala);
@@ -145,6 +145,22 @@ void main() {
       final jugando = await b.estado((e) => e.fase == FaseSala.jugando);
       expect(jugando.tablero.where((v) => v != null), hasLength(6));
       expect([for (final i in ini) jugando.tablero[i]], [6, 5, 4, 3, 2, 1]);
+
+      // Ronda 1: nadie ha tirado; Beto lanza y los dos reciben los mismos dados.
+      expect(jugando.ronda!.fase, FaseRonda.esperandoTirada);
+      b.enviar({'tipo': MsgCliente.tirar, 'ronda': 1});
+      a.enviar({'tipo': MsgCliente.tirar, 'ronda': 1}); // repetida: no cambia
+      final ra = await a.estado((e) => e.ronda?.fase == FaseRonda.resolviendo);
+      final rb = await b.estado((e) => e.ronda?.fase == FaseRonda.resolviendo);
+      expect(ra.dados, rb.dados);
+      a.enviar({'tipo': MsgCliente.pasarRonda, 'ronda': 1});
+      await b.estado(
+        (e) => e.ronda!.resoluciones.values.contains(Resolucion.paso),
+      );
+      b.enviar({'tipo': MsgCliente.pasarRonda, 'ronda': 1});
+      final r2 = await a.estado((e) => e.ronda?.id == 2);
+      expect(r2.ronda!.fase, FaseRonda.esperandoTirada);
+      expect(r2.dados, isNull);
 
       // Beto pierde la conexión: Ana lo ve caído.
       await b.cerrar();

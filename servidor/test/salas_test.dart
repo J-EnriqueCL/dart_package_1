@@ -33,6 +33,35 @@ class Jugador {
       enviar({'tipo': MsgCliente.unirse, 'codigo': codigo});
   void accion(String tipo) => enviar({'tipo': tipo});
 
+  /// Id de la ronda que muestra mi último estado.
+  int get ronda => estado.ronda!.id;
+
+  /// Pide lanzar los dados de la ronda actual (o de [de], si se da).
+  void tirar({int? de}) =>
+      enviar({'tipo': MsgCliente.tirar, 'ronda': de ?? ronda});
+  void confirmar(int indice, int ancla, {int? de}) => enviar({
+    'tipo': MsgCliente.confirmarJugada,
+    'ronda': de ?? ronda,
+    'indice': indice,
+    'ancla': ancla,
+  });
+  void pasarRonda({int? de}) =>
+      enviar({'tipo': MsgCliente.pasarRonda, 'ronda': de ?? ronda});
+
+  /// Primera jugada posible con los dados actuales: (casilla, ancla).
+  (int, int)? jugadaPosible() {
+    final e = estado;
+    final ctl = e.crearControlador();
+    for (var pos = 0; pos < 2; pos++) {
+      final d = ctl.destinosPosibles(
+        ancla: e.dados![pos],
+        colocar: e.dados![1 - pos],
+      );
+      if (d.isNotEmpty) return (d.first, pos);
+    }
+    return null;
+  }
+
   /// Pone el 1..6 (o [orden]) en las posiciones iniciales de mi tablero.
   void colocarIniciales({List<int>? orden}) {
     final ini = estado.mapaOficial.indicesIniciales;
@@ -59,10 +88,11 @@ class Jugador {
   }
 }
 
-/// Tira y coloca (o pasa si no hay movimientos) en nombre de [j].
-void jugarTurno(Jugador j) {
-  j.accion(MsgCliente.tirar);
+/// Resuelve la ronda abierta en nombre de [j]: confirma una jugada si hay y si
+/// no, pasa. No hace nada si [j] no está pendiente.
+void resolver(Jugador j) {
   final e = j.estado;
+  if (!e.estoyPendiente) return;
   final ctl = e.crearControlador();
   for (var pos = 0; pos < 2; pos++) {
     final destinos = ctl.destinosPosibles(
@@ -70,30 +100,34 @@ void jugarTurno(Jugador j) {
       colocar: e.dados![1 - pos],
     );
     if (destinos.isNotEmpty) {
-      j.enviar({
-        'tipo': MsgCliente.colocar,
-        'indice': destinos.first,
-        'ancla': pos,
-      });
+      j.confirmar(destinos.first, pos);
       return;
     }
   }
-  j.accion(MsgCliente.pasar);
+  j.pasarRonda();
+}
+
+/// Una ronda completa: el primero tira y todos los pendientes resuelven.
+void jugarRonda(List<Jugador> js) {
+  js.first.tirar();
+  for (final j in js) {
+    resolver(j);
+  }
 }
 
 void main() {
   late GestorSalas g;
 
   GestorSalas nuevo({
-    Duration turno = _larga,
+    Duration ronda = _larga,
     Duration graciaPartida = _larga,
     Duration graciaLobby = _larga,
-    int max = 4,
+    int max = maxJugadoresEnLinea,
     int fallos = 8,
     DateTime Function()? ahora,
   }) => g = GestorSalas(
     config: ConfigSalas(
-      tiempoTurno: turno,
+      tiempoRonda: ronda,
       graciaPartida: graciaPartida,
       graciaLobby: graciaLobby,
       maxJugadores: max,
@@ -144,11 +178,12 @@ void main() {
     test('crear sala da un código de 6 caracteres y hace anfitrión', () {
       final ana = Jugador(g, 'ana');
       expect(ana.canal.tipos, [MsgServidor.sinSala]);
-      ana.crearSala(mapa: 2);
+      ana.crearSala();
       final e = ana.estado;
       expect(e.codigo, matches(RegExp(r'^[A-HJKMNP-Z2-9]{6}$')));
       expect(e.fase, FaseSala.lobby);
-      expect(e.mapa, 2);
+      expect(e.mapa, 0);
+      expect(e.maxJugadores, 5);
       expect(e.soyAnfitrion, isTrue);
       expect([for (final j in e.jugadores) j.nombre], ['ana']);
       expect(g.totalSalas, 1);
@@ -240,12 +275,18 @@ void main() {
       beto.accion(MsgCliente.empezar);
       expect(beto.canal.ultimoError, contains('anfitrión'));
 
-      ana.enviar({'tipo': MsgCliente.elegirMapa, 'mapa': 3});
-      expect(ana.estado.mapa, 3);
-      expect(beto.estado.mapa, 3);
+      ana.enviar({'tipo': MsgCliente.elegirMapa, 'mapa': 0});
+      expect(ana.estado.mapa, 0);
+      // Los niveles 2, 3 y 4 no están disponibles en línea todavía.
+      for (final m in [1, 2, 3]) {
+        ana.enviar({'tipo': MsgCliente.elegirMapa, 'mapa': m});
+        expect(ana.canal.ultimoError, contains('no está disponible'));
+      }
       ana.enviar({'tipo': MsgCliente.elegirMapa, 'mapa': 99});
       expect(ana.canal.ultimoError, contains('Mapa inválido'));
-      expect(beto.estado.mapa, 3);
+      expect(beto.estado.mapa, 0);
+      Jugador(g, 'otro').crearSala(mapa: 2);
+      expect(g.salaDeUsuario(usuarioFalso('otro').id), isNull);
     });
 
     test('no se empieza sin suficientes jugadores ni con alguien caído', () {
@@ -303,75 +344,215 @@ void main() {
   });
 
   group('Partida', () {
-    test('al confirmar todos hay turno y cada uno ve su propio tablero', () {
-      final (ana, beto) = parejaJugando();
-      final e = ana.estado;
-      expect(e.fase, FaseSala.jugando);
-      expect(e.tablero.where((v) => v != null), hasLength(6));
-      expect(e.turnoDe, anyOf(ana.id, beto.id));
-      expect(e.segundosTurno, isNotNull);
-      final ini = e.mapaOficial.indicesIniciales;
-      expect([for (final i in ini) e.tablero[i]], [1, 2, 3, 4, 5, 6]);
-      expect(
-        [for (final i in ini) beto.estado.tablero[i]],
-        [6, 5, 4, 3, 2, 1],
-        reason: 'Beto repartió distinto y solo ve el suyo',
-      );
+    test(
+      'al confirmar todos: ronda 1 esperando tirada, cada uno ve lo suyo',
+      () {
+        final (ana, beto) = parejaJugando();
+        final e = ana.estado;
+        expect(e.fase, FaseSala.jugando);
+        expect(e.tablero.where((v) => v != null), hasLength(6));
+        expect(e.ronda!.id, 1);
+        expect(e.ronda!.fase, FaseRonda.esperandoTirada);
+        expect(e.dados, isNull, reason: 'no se tira nada automáticamente');
+        expect(e.ronda!.segundos, isNull);
+        expect(e.ronda!.resoluciones, isEmpty);
+        expect(ana.estado.puedoTirar && beto.estado.puedoTirar, isTrue);
+        final ini = e.mapaOficial.indicesIniciales;
+        expect([for (final i in ini) e.tablero[i]], [1, 2, 3, 4, 5, 6]);
+        expect(
+          [for (final i in ini) beto.estado.tablero[i]],
+          [6, 5, 4, 3, 2, 1],
+          reason: 'Beto repartió distinto y solo ve el suyo',
+        );
+      },
+    );
 
-      final otro = e.turnoDe == ana.id ? beto : ana;
-      otro.accion(MsgCliente.tirar);
-      expect(otro.canal.ultimoError, 'No es tu turno.');
-      expect(otro.estado.dados, isNull);
+    test('cualquiera puede tirar; todos reciben los mismos dados', () {
+      final (ana, beto) = parejaJugando();
+      beto.tirar(); // no es el anfitrión: no importa
+      final d = beto.estado.dados!;
+      expect(d, hasLength(2));
+      expect(ana.estado.dados, d);
+      expect(ana.estado.ronda!.fase, FaseRonda.resolviendo);
+      expect(ana.estado.ronda!.resoluciones, {
+        ana.id: Resolucion.pendiente,
+        beto.id: Resolucion.pendiente,
+      });
+      expect(ana.estado.ronda!.segundos, isNotNull);
+      expect(ana.estado.puedoTirar, isFalse);
     });
 
-    test('un turno completo por mensajes cambia el tablero y el turno', () {
+    test('dos solicitudes de tirada seguidas generan una sola tirada', () {
       final (ana, beto) = parejaJugando();
-      final porId = {ana.id: ana, beto.id: beto};
-      final primero = porId[ana.estado.turnoDe]!;
+      ana.tirar();
+      final d = ana.estado.dados;
+      beto.tirar(); // llega con la ronda ya abierta: no hace nada
+      ana.tirar();
+      expect(ana.estado.dados, d);
+      expect(beto.estado.dados, d);
+      expect(beto.canal.ultimoError, isNull);
+      expect(ana.estado.ronda!.id, 1);
+    });
 
-      primero.accion(MsgCliente.tirar);
-      final e = primero.estado;
-      expect(e.dados, hasLength(2));
-      expect(porId[e.turnoDe] == primero, isTrue);
-      final rival = primero == ana ? beto : ana;
-      expect(rival.estado.dados, e.dados, reason: 'el rival ve los dados');
+    test(
+      'una ronda: todos confirman o pasan, y la siguiente espera tirada',
+      () {
+        final (ana, beto) = parejaJugando();
+        ana.tirar();
+        final antesBeto = beto.estado.tablero;
+        final jugada = ana.jugadaPosible();
+        if (jugada == null) {
+          ana.pasarRonda();
+        } else {
+          ana.confirmar(jugada.$1, jugada.$2);
+          expect(
+            ana.estado.tablero[jugada.$1],
+            ana.estado.dados![1 - jugada.$2],
+          );
+        }
+        expect(
+          ana.estado.miResolucion,
+          anyOf(Resolucion.confirmo, Resolucion.paso),
+        );
+        expect(beto.estado.miResolucion, Resolucion.pendiente);
+        expect(beto.estado.tablero, antesBeto, reason: 'tablero ajeno intacto');
+        expect(
+          beto.estado.ronda!.fase,
+          FaseRonda.resolviendo,
+          reason: 'falta Beto',
+        );
+        expect(ana.estado.ronda!.pendientes, [beto.id]);
 
-      final ctl = e.crearControlador();
-      final opciones = [
-        for (var pos = 0; pos < 2; pos++)
-          for (final c in ctl.destinosPosibles(
-            ancla: e.dados![pos],
-            colocar: e.dados![1 - pos],
-          ))
-            (pos, c),
-      ];
-      if (opciones.isEmpty) {
-        primero.accion(MsgCliente.pasar);
-      } else {
-        final (pos, c) = opciones.first;
-        primero.enviar({'tipo': MsgCliente.colocar, 'indice': c, 'ancla': pos});
-        expect(primero.estado.tablero[c], e.dados![1 - pos]);
-      }
-      expect(primero.estado.turnoDe, rival.id);
-      expect(primero.estado.turno, 2);
-      expect(rival.estado.dados, isNull);
+        beto.pasarRonda();
+        for (final j in [ana, beto]) {
+          final r = j.estado.ronda!;
+          expect(r.id, 2);
+          expect(r.fase, FaseRonda.esperandoTirada);
+          expect(r.dados, isNull);
+          expect(r.segundos, isNull);
+          expect(r.resoluciones, isEmpty);
+        }
+      },
+    );
+
+    test(
+      'se puede pasar aunque haya jugadas, y confirmar tras pasar no vale',
+      () {
+        final (ana, beto) = parejaJugando();
+        ana.tirar();
+        final jugada = beto.jugadaPosible();
+        ana.pasarRonda();
+        expect(ana.estado.miResolucion, Resolucion.paso);
+        if (jugada != null) {
+          ana.confirmar(jugada.$1, jugada.$2);
+          expect(ana.canal.ultimoError, contains('pasaste'));
+          expect(ana.estado.tablero.where((v) => v != null), hasLength(6));
+        }
+      },
+    );
+
+    test(
+      'resolver dos veces o con acciones contradictorias no cambia nada',
+      () {
+        final (ana, beto) = parejaJugando();
+        ana.tirar();
+        final jugada = ana.jugadaPosible()!;
+        ana.confirmar(jugada.$1, jugada.$2);
+        final tablero = ana.estado.tablero;
+        final puntos = ana.estado.miJugador!.puntos;
+        ana.confirmar(jugada.$1, jugada.$2); // duplicado
+        ana.confirmar(jugada.$1, 1 - jugada.$2); // otra jugada
+        ana.pasarRonda(); // contradictorio
+        expect(ana.canal.ultimoError, contains('confirmaste'));
+        expect(ana.estado.tablero, tablero);
+        expect(ana.estado.miJugador!.puntos, puntos);
+        expect(ana.estado.miResolucion, Resolucion.confirmo);
+
+        beto.pasarRonda();
+        beto.pasarRonda(de: 1); // duplicado con la ronda ya cerrada
+        expect(beto.canal.ultimoError, contains('ronda'));
+        expect(beto.estado.ronda!.id, 2, reason: 'se cerró una sola vez');
+      },
+    );
+
+    test('las acciones de una ronda anterior se rechazan', () {
+      final (ana, beto) = parejaJugando();
+      jugarRonda([ana, beto]);
+      expect(ana.estado.ronda!.id, 2);
+      ana.tirar(de: 1);
+      expect(ana.canal.ultimoError, contains('ronda'));
+      expect(ana.estado.dados, isNull);
+      ana.pasarRonda(de: 1);
+      expect(ana.canal.ultimoError, contains('ronda'));
+      ana.tirar(de: 7); // de una ronda que aún no existe
+      expect(ana.canal.ultimoError, contains('ronda'));
+      expect(ana.estado.ronda!.fase, FaseRonda.esperandoTirada);
+    });
+
+    test('un error reenvía el estado real al que estaba desactualizado', () {
+      final (ana, beto) = parejaJugando();
+      jugarRonda([ana, beto]);
+      final antes = ana.canal.recibidos.length;
+      ana.tirar(de: 1);
+      final nuevos = ana.canal.recibidos.skip(antes).toList();
+      expect(nuevos.map((m) => m['tipo']), [
+        MsgServidor.estado,
+        MsgServidor.error,
+      ]);
+    });
+
+    test('sin tirada previa no se puede confirmar ni pasar', () {
+      final (ana, _) = parejaJugando();
+      ana.pasarRonda();
+      expect(ana.canal.ultimoError, contains('dados'));
+      ana.confirmar(1, 0);
+      expect(ana.canal.ultimoError, contains('dados'));
+      expect(ana.estado.dados, isNull);
     });
 
     test('mensajes mal formados dan error y no rompen la partida', () {
-      final (ana, beto) = parejaJugando();
-      final primero = ana.estado.turnoDe == ana.id ? ana : beto;
-      primero.accion(MsgCliente.tirar);
-      primero.enviar({'tipo': MsgCliente.colocar});
-      expect(primero.canal.ultimoError, contains('indice'));
-      primero.enviar({'tipo': MsgCliente.colocar, 'indice': 'x', 'ancla': 0});
-      expect(primero.canal.ultimoError, contains('indice'));
-      primero.enviar({'tipo': MsgCliente.colocar, 'indice': 1.5, 'ancla': 0});
-      expect(primero.canal.ultimoError, contains('indice'));
-      primero.enviar({'tipo': 'inventado'});
-      expect(primero.canal.ultimoError, contains('desconocido'));
-      primero.enviar({'tipo': MsgCliente.crearSala, 'mapa': 'uno'});
-      expect(primero.canal.ultimoError, isNotNull);
-      expect(primero.estado.fase, FaseSala.jugando);
+      final (ana, _) = parejaJugando();
+      ana.tirar();
+      ana.enviar({'tipo': MsgCliente.confirmarJugada});
+      expect(ana.canal.ultimoError, contains('ronda'));
+      ana.enviar({'tipo': MsgCliente.confirmarJugada, 'ronda': 1});
+      expect(ana.canal.ultimoError, contains('indice'));
+      ana.enviar({
+        'tipo': MsgCliente.confirmarJugada,
+        'ronda': 1,
+        'indice': 'x',
+        'ancla': 0,
+      });
+      expect(ana.canal.ultimoError, contains('indice'));
+      ana.enviar({
+        'tipo': MsgCliente.confirmarJugada,
+        'ronda': 1.5,
+        'indice': 1,
+        'ancla': 0,
+      });
+      expect(ana.canal.ultimoError, contains('ronda'));
+      ana.enviar({'tipo': MsgCliente.pasarRonda, 'ronda': '1'});
+      expect(ana.canal.ultimoError, contains('ronda'));
+      ana.enviar({'tipo': 'inventado'});
+      expect(ana.canal.ultimoError, contains('desconocido'));
+      ana.enviar({'tipo': MsgCliente.crearSala, 'mapa': 'uno'});
+      expect(ana.canal.ultimoError, isNotNull);
+      expect(ana.estado.fase, FaseSala.jugando);
+      expect(ana.estado.miResolucion, Resolucion.pendiente);
+    });
+
+    test('un dado enviado por el cliente no se usa', () {
+      final (ana, _) = parejaJugando();
+      ana.enviar({
+        'tipo': MsgCliente.tirar,
+        'ronda': 1,
+        'dados': [6, 6],
+        'dado': 6,
+      });
+      expect(ana.estado.dados, hasLength(2));
+      // (con azar real casi nunca salen justo [6, 6]; basta con que se ignore
+      // el campo: el servidor no lo lee).
+      expect(ana.canal.ultimoError, isNull);
     });
 
     test('conceder da la victoria al otro y el anfitrión reabre el lobby', () {
@@ -383,7 +564,7 @@ void main() {
         expect(e.resultado!.motivo, MotivoFin.rendicion);
         expect(e.resultado!.ganadores, [ana.id]);
         expect(e.jugador(beto.id)!.estado, EstadoJugador.concedio);
-        expect(e.turnoDe, isNull);
+        expect(e.ronda, isNull);
       }
       beto.accion(MsgCliente.conceder);
       expect(beto.canal.ultimoError, contains('terminó'));
@@ -432,7 +613,14 @@ void main() {
       }
       caro.accion(MsgCliente.conceder);
       expect(ana.estado.fase, FaseSala.jugando);
-      expect(ana.estado.turnoDe, isNot(caro.id));
+      ana.tirar();
+      expect(
+        ana.estado.ronda!.resoluciones.keys,
+        isNot(contains(caro.id)),
+        reason: 'el rendido no debe resolver rondas',
+      );
+      caro.tirar();
+      expect(caro.canal.ultimoError, isNotNull);
       beto.accion(MsgCliente.conceder);
       expect(ana.estado.fase, FaseSala.terminada);
       expect(ana.estado.resultado!.ganadores, [ana.id]);
@@ -461,8 +649,7 @@ void main() {
         expect(e.tablero, hasLength(49));
         expect(e.tablero.where((v) => v != null), isEmpty);
         expect(e.numerosPorColocar, [1, 2, 3, 4, 5, 6]);
-        expect(e.turnoDe, isNull);
-        expect(e.segundosTurno, isNull);
+        expect(e.ronda, isNull);
         expect(e.dados, isNull);
         for (final x in e.jugadores) {
           expect(x.estado, EstadoJugador.preparando);
@@ -534,49 +721,59 @@ void main() {
     test('no valen jugadas normales ni cambios tras confirmar', () {
       final (ana, beto) = parejaPreparando();
       ana.distribuir();
-      for (final tipo in [MsgCliente.tirar, MsgCliente.pasar]) {
-        ana.accion(tipo);
+      for (final tipo in [MsgCliente.tirar, MsgCliente.pasarRonda]) {
+        ana.enviar({'tipo': tipo, 'ronda': 1});
         expect(ana.canal.ultimoError, isNotNull);
       }
-      ana.enviar({'tipo': MsgCliente.colocar, 'indice': 1, 'ancla': 0});
+      ana.enviar({
+        'tipo': MsgCliente.confirmarJugada,
+        'ronda': 1,
+        'indice': 1,
+        'ancla': 0,
+      });
       expect(ana.canal.ultimoError, isNotNull);
       final ini = ana.estado.mapaOficial.indicesIniciales;
       ana.enviar({'tipo': MsgCliente.quitarInicial, 'indice': ini[0]});
       expect(ana.canal.ultimoError, contains('confirmada'));
       expect(ana.estado.tablero[ini[0]], 1);
-      beto.accion(MsgCliente.tirar);
+      beto.enviar({'tipo': MsgCliente.tirar, 'ronda': 1});
       expect(beto.canal.ultimoError, isNotNull);
     });
 
-    test('la partida empieza una vez, con reloj, al confirmar el último', () {
+    test('la partida empieza una vez, en "esperando tirada", al confirmar el último', () {
       final (ana, beto) = parejaPreparando();
       ana.distribuir();
       expect(ana.estado.fase, FaseSala.preparacion);
-      expect(ana.estado.segundosTurno, isNull);
+      expect(ana.estado.ronda, isNull);
       beto.distribuir();
       final e = ana.estado;
       expect(e.fase, FaseSala.jugando);
-      expect(e.segundosTurno, isNotNull);
-      final turno = e.turnoDe;
-      // Mensajes repetidos de confirmación no reinician el turno.
+      expect(e.ronda!.fase, FaseRonda.esperandoTirada);
+      expect(e.ronda!.segundos, isNull);
+      // Mensajes repetidos de confirmación no reinician nada.
       ana.accion(MsgCliente.confirmarDistribucion);
       beto.accion(MsgCliente.confirmarDistribucion);
-      expect(ana.estado.turnoDe, turno);
-      expect(ana.estado.turno, 1);
+      expect(ana.estado.ronda!.id, 1);
       expect(ana.estado.fase, FaseSala.jugando);
     });
 
-    test('no corre el reloj de turno durante la preparación', () async {
-      nuevo(turno: const Duration(milliseconds: 80));
-      final (ana, beto) = parejaPreparando();
-      ana.distribuir();
-      await esperar(250);
-      expect(ana.estado.fase, FaseSala.preparacion);
-      expect(ana.estado.mensaje, isNot(contains('Se agotó')));
-      beto.distribuir();
-      expect(ana.estado.fase, FaseSala.jugando);
-      expect(ana.estado.segundosTurno, isNotNull);
-    });
+    test(
+      'no corre ningún plazo durante la preparación ni esperando tirada',
+      () async {
+        nuevo(ronda: const Duration(milliseconds: 80));
+        final (ana, beto) = parejaPreparando();
+        ana.distribuir();
+        await esperar(250);
+        expect(ana.estado.fase, FaseSala.preparacion);
+        expect(ana.estado.mensaje, isNot(contains('Se agotó')));
+        beto.distribuir();
+        expect(ana.estado.fase, FaseSala.jugando);
+        await esperar(250);
+        expect(ana.estado.ronda!.id, 1);
+        expect(ana.estado.ronda!.fase, FaseRonda.esperandoTirada);
+        expect(ana.estado.mensaje, isNot(contains('Se agotó')));
+      },
+    );
 
     test('reconectar restaura una preparación incompleta', () {
       final (ana, beto) = parejaPreparando();
@@ -652,7 +849,7 @@ void main() {
       final e = ana.estado;
       expect(e.fase, FaseSala.jugando);
       expect(e.jugador(caro.id)!.estado, EstadoJugador.concedio);
-      expect(e.turnoDe, anyOf(ana.id, beto.id));
+      expect(e.ronda!.fase, FaseRonda.esperandoTirada);
     });
 
     test('no volver a tiempo en la preparación cuenta como abandono', () async {
@@ -748,18 +945,52 @@ void main() {
       expect(ana.estado.jugador(beto.id)!.graciaRestante, isNull);
     });
 
-    test('quien vuelve a tiempo conserva sus puntos y su turno', () async {
+    test('quien vuelve a tiempo conserva sus puntos y la ronda', () async {
       nuevo(graciaPartida: const Duration(milliseconds: 300));
       final (ana, beto) = parejaJugando();
-      final turno = ana.estado.turnoDe;
-      final (caido, otro) = turno == ana.id ? (ana, beto) : (beto, ana);
-      caido.caer();
+      ana.tirar();
+      final dados = ana.estado.dados;
+      beto.caer();
       await esperar(100);
-      caido.volver();
+      beto.volver();
       await esperar(400);
-      expect(otro.estado.fase, FaseSala.jugando);
-      expect(caido.estado.turnoDe, turno);
+      expect(ana.estado.fase, FaseSala.jugando);
+      expect(beto.estado.ronda!.id, 1);
+      expect(beto.estado.dados, dados, reason: 'no se vuelve a tirar');
+      expect(beto.estado.miResolucion, Resolucion.pendiente);
     });
+
+    test(
+      'reconectar conserva dados, resolución y plazo sin reiniciarlo',
+      () async {
+        nuevo(ronda: const Duration(seconds: 30));
+        final (ana, beto) = parejaJugando();
+        ana.tirar();
+        await esperar(1100);
+        final antes = ana.estado.ronda!.segundos!;
+        final dados = ana.estado.dados;
+        final jugada = beto.jugadaPosible();
+        if (jugada == null) {
+          beto.pasarRonda();
+        } else {
+          beto.confirmar(jugada.$1, jugada.$2);
+        }
+        final resolucion = beto.estado.miResolucion;
+        final tablero = beto.estado.tablero;
+        beto.caer();
+        beto.volver();
+        final e = beto.estado;
+        expect(e.dados, dados);
+        expect(e.miResolucion, resolucion);
+        expect(e.tablero, tablero);
+        expect(e.ronda!.segundos, lessThanOrEqualTo(antes));
+        expect(e.ronda!.segundos, greaterThan(antes - 3));
+        // Tras reconectar sigue sin poder resolver otra vez.
+        beto.pasarRonda();
+        expect(beto.estado.miResolucion, resolucion);
+        expect(ana.estado.ronda!.id, 1, reason: 'la ronda sigue abierta (Ana)');
+      },
+    );
 
     test('en partida, no volver a tiempo cuenta como abandono', () async {
       nuevo(graciaPartida: const Duration(milliseconds: 80));
@@ -793,7 +1024,6 @@ void main() {
         final e = ana.estado;
         expect(e.fase, FaseSala.jugando);
         expect(e.jugador(caro.id)!.estado, EstadoJugador.abandono);
-        expect(e.turnoDe, anyOf(ana.id, beto.id));
         expect(beto.estado.fase, FaseSala.jugando);
       },
     );
@@ -853,12 +1083,9 @@ void main() {
       final sala = g.sala(codigo)!;
 
       // Terminado: tablero sin jugadas posibles (preparado a mano) y se
-      // evalúa al repartir el siguiente turno.
+      // evalúa al cerrar la ronda.
       bloquear(sala.partida!.jugador(dani.id)!, Random(3));
-      final porId = {
-        for (final j in [ana, beto, caro, dani]) j.id: j,
-      };
-      jugarTurno(porId[ana.estado.turnoDe]!);
+      jugarRonda([ana, beto, caro, dani]);
 
       beto.accion(MsgCliente.conceder); // rendición explícita
       caro.caer(); // desconexión temporal con gracia vigente
@@ -1036,95 +1263,503 @@ void main() {
     );
   });
 
-  group('Puntuación inicial y reconexión', () {
-    test('no se duplica al editar, confirmar, repetir ni reconectar', () {
-      final ana = Jugador(g, 'ana')..crearSala(mapa: 2); // Nivel 3: 4 + 4
-      final beto = Jugador(g, 'beto')..unirse(ana.estado.codigo);
-      ana.accion(MsgCliente.empezar);
+  group('Jugadores y meta', () {
+    const nombres = ['ana', 'beto', 'caro', 'dani', 'eva', 'fede'];
 
-      int puntosDe(Jugador j, Jugador de) => j.estado.jugador(de.id)!.puntos;
-
-      // Editando no hay puntos de nadie.
-      ana.colocarIniciales();
-      expect(puntosDe(beto, ana), 0);
-      final ini = ana.estado.mapaOficial.indicesIniciales;
-      ana.enviar({'tipo': MsgCliente.quitarInicial, 'indice': ini[0]});
-      ana.enviar({
-        'tipo': MsgCliente.colocarInicial,
-        'indice': ini[0],
-        'numero': 1,
-      });
-      expect(puntosDe(beto, ana), 0);
-
-      // Al confirmar cuentan una vez, aunque se repita el mensaje.
-      ana.accion(MsgCliente.confirmarDistribucion);
-      ana.accion(MsgCliente.confirmarDistribucion);
-      expect(puntosDe(beto, ana), 8);
-      expect(puntosDe(ana, ana), 8);
-
-      // Reconectar en la preparación no suma ni resta.
-      ana.caer();
-      ana.volver();
-      expect(puntosDe(ana, ana), 8);
-      expect(puntosDe(beto, ana), 8);
-
-      // Empieza la partida: los puntos siguen siendo los mismos.
-      beto.distribuir();
-      expect(ana.estado.fase, FaseSala.jugando);
-      expect(puntosDe(ana, ana), 8);
-      expect(puntosDe(ana, beto), 8);
-      beto.caer();
-      beto.volver();
-      ana.caer();
-      ana.volver();
-      for (final j in [ana, beto]) {
-        expect(puntosDe(j, ana), 8);
-        expect(puntosDe(j, beto), 8);
+    /// Sala con [n] jugadores ya jugando (todos confirmaron su distribución).
+    (List<Jugador>, Sala) salaDe(int n) {
+      final js = [Jugador(g, nombres[0])..crearSala()];
+      for (var k = 1; k < n; k++) {
+        js.add(Jugador(g, nombres[k])..unirse(js.first.estado.codigo));
       }
+      js.first.accion(MsgCliente.empezar);
+      for (final j in js) {
+        j.distribuir();
+      }
+      return (js, g.sala(js.first.estado.codigo)!);
+    }
+
+    test('la meta se fija al empezar según el número de jugadores', () {
+      for (final (n, meta) in [(2, 26), (3, 24), (4, 22), (5, 20)]) {
+        final (js, _) = salaDe(n);
+        for (final j in js) {
+          expect(j.estado.meta, meta, reason: '$n jugadores');
+          expect(j.estado.fase, FaseSala.jugando);
+        }
+        g.cerrar();
+        nuevo();
+      }
+    });
+
+    test('la sala admite cinco jugadores y rechaza al sexto', () {
+      final js = [Jugador(g, nombres[0])..crearSala()];
+      for (var k = 1; k < 5; k++) {
+        js.add(Jugador(g, nombres[k])..unirse(js.first.estado.codigo));
+      }
+      expect(js.first.estado.jugadores, hasLength(5));
+      final sexto = Jugador(g, nombres[5])..unirse(js.first.estado.codigo);
+      expect(sexto.canal.ultimoError, contains('llena'));
+      expect(js.first.estado.jugadores, hasLength(5));
+    });
+
+    test('con cinco jugadores se puede jugar una ronda completa', () {
+      final (js, _) = salaDe(5);
+      js.first.tirar();
+      for (final j in js) {
+        j.pasarRonda();
+      }
+      expect(js.first.estado.ronda!.id, 2);
+      expect(js.last.estado.jugadores, hasLength(5));
+    });
+
+    test('la meta no cambia aunque se rindan o abandonen después', () {
+      final (js, _) = salaDe(4);
+      js[3].accion(MsgCliente.conceder);
+      js[2].caer();
+      expect(js.first.estado.meta, 22);
+      js[2].volver();
+      expect(js[2].estado.meta, 22);
     });
   });
 
-  group('Reloj de turno', () {
-    test('si no juega, el turno pasa solo', () async {
-      nuevo(turno: const Duration(milliseconds: 150));
-      final (ana, _) = parejaJugando();
-      final primero = ana.estado.turnoDe;
-      await esperar(220); // se agota una vez (a los 150 ms), no dos
-      expect(ana.estado.turno, greaterThan(1));
-      expect(ana.estado.turnoDe, isNot(primero));
-      expect(ana.estado.mensaje, contains('Se agotó el tiempo'));
+  group('Premios competitivos', () {
+    const nombres = ['ana', 'beto', 'caro', 'dani'];
+
+    (List<Jugador>, Sala) salaDe(int n) {
+      final js = [Jugador(g, nombres[0])..crearSala()];
+      for (var k = 1; k < n; k++) {
+        js.add(Jugador(g, nombres[k])..unirse(js.first.estado.codigo));
+      }
+      js.first.accion(MsgCliente.empezar);
+      for (final j in js) {
+        j.distribuir();
+      }
+      return (js, g.sala(js.first.estado.codigo)!);
+    }
+
+    /// Completa en el tablero de [j] todo el grupo [grupo] y lo registra como
+    /// completado en la ronda abierta (equivale a confirmar la jugada que lo
+    /// cierra; el premio se decide al cerrar la ronda). Después reconecta para
+    /// que el cliente reciba el estado.
+    void completar(Sala sala, Jugador j, String grupo) {
+      final p = sala.partida!;
+      final jp = p.jugador(j.id)!;
+      final c = jp.controlador!;
+      final g = p.libro.grupo(grupo)!;
+      final base = [
+        for (final i in g.casillas)
+          if (c.matriz[i].valor != null) c.matriz[i].valor!,
+      ];
+      for (final i in g.casillas) {
+        if (c.matriz[i].valor == null) c.colocar(i, base.firstOrNull ?? 1);
+      }
+      p.registrarGruposCompletos(jp);
+    }
+
+    int puntos(Jugador j, Jugador de) => j.estado.jugador(de.id)!.puntos;
+
+    test('el Nivel 1 no da puntos iniciales: ningún grupo nace completo', () {
+      final (js, _) = salaDe(2);
+      for (final j in js) {
+        for (final de in js) {
+          expect(puntos(j, de), 0);
+        }
+        expect(j.estado.reclamaciones.every((r) => r.niveles.isEmpty), isTrue);
+        expect(j.estado.misPendientes, isEmpty);
+      }
     });
 
-    test('jugar a tiempo reinicia el reloj para el siguiente turno', () async {
-      nuevo(turno: const Duration(milliseconds: 300));
+    test(
+      'la finalización queda pendiente y se liquida una vez al cerrar la ronda',
+      () {
+        final (js, sala) = salaDe(2);
+        final (ana, beto) = (js[0], js[1]);
+        ana.tirar();
+        completar(sala, ana, 'N1-a2');
+        ana.caer(); // reconexión ANTES de liquidar
+        ana.volver();
+        expect(ana.estado.misPendientes, ['N1-a2']);
+        expect(beto.estado.misPendientes, isEmpty);
+        expect(puntos(ana, ana), 0, reason: 'sin liquidar no es definitivo');
+        expect(ana.estado.reclamacionDe('N1-a2').niveles, isEmpty);
+
+        ana.pasarRonda();
+        beto.pasarRonda();
+        for (var k = 0; k < 3; k++) {
+          // Reconexiones DESPUÉS de liquidar: no se vuelve a conceder nada.
+          ana.caer();
+          ana.volver();
+          beto.caer();
+          beto.volver();
+          expect(puntos(ana, ana), 7);
+          expect(puntos(beto, ana), 7);
+          expect(puntos(ana, beto), 0);
+        }
+        final r = ana.estado.reclamacionDe('N1-a2');
+        expect(r.niveles, [
+          [ana.id],
+        ]);
+        expect(ana.estado.misPendientes, isEmpty);
+        expect(
+          ana.estado.liquidacion.map(
+            (a) => (a.jugador, a.grupo, a.nivel, a.puntos),
+          ),
+          [(ana.id, 'N1-a2', 1, 7)],
+        );
+        expect(ana.estado.mensaje, contains('Premios:'));
+      },
+    );
+
+    test('empate en la misma ronda: comparten el primer nivel', () {
+      Map<String, Object?> jugar(List<String> orden) {
+        final (js, sala) = salaDe(3);
+        final por = {for (final j in js) j.id: j};
+        js.first.tirar();
+        for (final id in orden) {
+          completar(sala, por[id]!, 'N1-a2');
+        }
+        for (final j in js) {
+          j.pasarRonda();
+        }
+        final e = js.first.estado;
+        final res = {
+          'puntos': [for (final j in e.jugadores) j.puntos],
+          'niveles': e.reclamacionDe('N1-a2').niveles,
+        };
+        g.cerrar();
+        nuevo();
+        return res;
+      }
+
+      final a = jugar(['id_ana', 'id_beto']);
+      final b = jugar(['id_beto', 'id_ana']); // orden inverso de llegada
+      expect(a, b, reason: 'el orden de llegada no cambia nada');
+      expect(a['puntos'], [7, 7, 0]);
+      expect(a['niveles'], [
+        ['id_ana', 'id_beto'],
+      ]);
+    });
+
+    test('rondas distintas ocupan niveles sucesivos y luego no hay premio', () {
+      final (js, sala) = salaDe(4);
+      final esperado = [7, 5, 3, 0];
+      for (var k = 0; k < 4; k++) {
+        js.first.tirar();
+        completar(sala, js[k], 'N1-a2');
+        for (final j in js) {
+          if (j.estado.estoyPendiente) j.pasarRonda();
+        }
+        expect(js.first.estado.ronda!.id, k + 2);
+        expect(puntos(js.first, js[k]), esperado[k], reason: 'jugador $k');
+      }
+      final r = js.first.estado.reclamacionDe('N1-a2');
+      expect(r.niveles, [
+        [js[0].id],
+        [js[1].id],
+        [js[2].id],
+      ]);
+      expect(r.sinPremio, [js[3].id], reason: 'completó, pero sin premio');
+      expect(js.first.estado.liquidacion.single.nivel, 0);
+      // Quien ya cobró ese grupo no vuelve a cobrar aunque se registre otra vez.
+      js.first.tirar();
+      completar(sala, js[0], 'N1-a2');
+      for (final j in js) {
+        if (j.estado.estoyPendiente) j.pasarRonda();
+      }
+      expect(puntos(js.first, js[0]), 7);
+    });
+
+    test('cada grupo es independiente aunque compartan color', () {
+      final (js, sala) = salaDe(2);
+      js.first.tirar();
+      completar(sala, js[0], 'N1-a1'); // verde 4 / 3 / 2
+      completar(sala, js[1], 'N1-a13'); // el otro verde, también 4
+      for (final j in js) {
+        j.pasarRonda();
+      }
+      expect(puntos(js[0], js[0]), 4);
+      expect(puntos(js[0], js[1]), 4);
+      expect(js[0].estado.reclamacionDe('N1-a1').niveles, [
+        [js[0].id],
+      ]);
+      expect(js[0].estado.reclamacionDe('N1-a13').niveles, [
+        [js[1].id],
+      ]);
+    });
+
+    test('varios grupos completados en la misma jugada puntúan todos', () {
+      final (js, sala) = salaDe(2);
+      js.first.tirar();
+      completar(sala, js[0], 'N1-a2');
+      completar(sala, js[0], 'N1-a34');
+      for (final j in js) {
+        j.pasarRonda();
+      }
+      expect(puntos(js[0], js[0]), 14);
+      expect(js[0].estado.liquidacion, hasLength(2));
+    });
+
+    test('la meta termina la partida al cerrar la ronda, no antes', () {
+      final (js, sala) = salaDe(2);
+      final p = sala.partida!;
+      p.jugador(js[0].id)!.puntos = 25;
+      js[0].tirar();
+      completar(sala, js[0], 'N1-a2'); // 25 + 7 = 32 >= 26, pero sin liquidar
+      js[0].pasarRonda();
+      expect(js[0].estado.fase, FaseSala.jugando, reason: 'falta Beto');
+      expect(sala.partida!.terminada, isFalse);
+      js[1].pasarRonda();
+      for (final j in js) {
+        final e = j.estado;
+        expect(e.fase, FaseSala.terminada);
+        expect(e.resultado!.motivo, MotivoFin.meta);
+        expect(e.resultado!.ganadores, [js[0].id]);
+        expect(puntos(j, js[0]), 32);
+      }
+      expect(js[0].estado.mensaje, contains('meta de 26'));
+    });
+
+    test(
+      'varios alcanzan la meta en la misma ronda: gana el de más puntos',
+      () {
+        final (js, sala) = salaDe(2);
+        final p = sala.partida!;
+        p.jugador(js[0].id)!.puntos = 25;
+        p.jugador(js[1].id)!.puntos = 21;
+        js[0].tirar();
+        completar(sala, js[0], 'N1-a2');
+        completar(sala, js[1], 'N1-a2'); // empatan: ambos +7 (1.er nivel)
+        for (final j in js) {
+          j.pasarRonda();
+        }
+        final e = js[0].estado;
+        expect(e.resultado!.motivo, MotivoFin.meta);
+        expect(puntos(js[0], js[0]), 32);
+        expect(puntos(js[0], js[1]), 28);
+        expect(e.resultado!.ganadores, [js[0].id]);
+      },
+    );
+
+    test('empate en el máximo al alcanzar la meta: comparten la victoria', () {
+      final (js, sala) = salaDe(2);
+      final p = sala.partida!;
+      p.jugador(js[0].id)!.puntos = 22;
+      p.jugador(js[1].id)!.puntos = 22;
+      js[0].tirar();
+      completar(sala, js[0], 'N1-a2');
+      completar(sala, js[1], 'N1-a2');
+      for (final j in js) {
+        j.pasarRonda();
+      }
+      expect(js[0].estado.resultado!.ganadores.toSet(), {js[0].id, js[1].id});
+    });
+
+    test('sin llegar a la meta la partida sigue; rendirse no concede premios nuevos', () {
+      final (js, sala) = salaDe(3);
+      js[0].tirar();
+      completar(sala, js[2], 'N1-a2');
+      js[2].accion(
+        MsgCliente.conceder,
+      ); // se rinde con una finalización pendiente
+      for (final j in js.take(2)) {
+        if (j.estado.estoyPendiente) j.pasarRonda();
+      }
+      expect(js[0].estado.fase, FaseSala.jugando);
+      // Lo completado antes de rendirse cuenta, pero no puede ganar.
+      expect(puntos(js[0], js[2]), 7);
+      expect(js[0].estado.jugador(js[2].id)!.participa, isFalse);
+    });
+  });
+
+  group('Plazo común de la ronda', () {
+    test('esperando la tirada no corre ningún plazo', () async {
+      nuevo(ronda: const Duration(milliseconds: 80));
       final (ana, beto) = parejaJugando();
-      final porId = {ana.id: ana, beto.id: beto};
-      await esperar(200);
-      jugarTurno(porId[ana.estado.turnoDe]!); // turno 2 empieza a los 200 ms
-      expect(ana.estado.turno, 2);
-      await esperar(200); // 400 ms: el reloj original ya habría saltado
-      expect(ana.estado.turno, 2);
-      await esperar(250); // 650 ms > 200 + 300
-      expect(ana.estado.turno, greaterThan(2));
+      await esperar(250);
+      expect(ana.estado.ronda!.fase, FaseRonda.esperandoTirada);
+      expect(ana.estado.ronda!.id, 1);
+      for (final j in [ana, beto]) {
+        expect(j.estado.miJugador!.estado, EstadoJugador.jugando);
+      }
     });
 
-    test('los eventos ajenos no alargan el turno', () async {
-      nuevo(turno: const Duration(milliseconds: 400));
+    test('empieza al publicar los dados y baja con el tiempo', () async {
+      nuevo(ronda: const Duration(seconds: 30));
       final (ana, beto) = parejaJugando();
-      final turno = ana.estado.turnoDe;
-      final (_, otro) = turno == ana.id ? (ana, beto) : (beto, ana);
-      await esperar(200);
-      otro.caer();
-      otro.volver(); // cada evento difunde estado, pero no reinicia el reloj
-      expect(ana.estado.turno, 1);
-      await esperar(320); // 520 ms desde el inicio > 400 ms del turno
-      expect(ana.estado.turno, 2);
+      ana.tirar();
+      for (final j in [ana, beto]) {
+        expect(j.estado.ronda!.segundos, inInclusiveRange(29, 30));
+      }
     });
 
-    test('el segundosTurno baja con el tiempo', () async {
-      nuevo(turno: const Duration(seconds: 30));
-      final (ana, _) = parejaJugando();
-      expect(ana.estado.segundosTurno, inInclusiveRange(29, 30));
+    test(
+      'al vencer, el que no respondió queda sin respuesta y se cierra',
+      () async {
+        nuevo(ronda: const Duration(milliseconds: 150));
+        final (ana, beto) = parejaJugando();
+        ana.tirar();
+        ana.pasarRonda();
+        await esperar(260);
+        final e = ana.estado;
+        expect(e.ronda!.id, 2);
+        expect(e.ronda!.fase, FaseRonda.esperandoTirada);
+        expect(e.mensaje, contains('no respondió'));
+        expect(e.mensaje, contains('beto'));
+        expect(e.jugador(beto.id)!.estado, EstadoJugador.jugando);
+        expect(beto.estado.tablero.where((v) => v != null), hasLength(6));
+      },
+    );
+
+    test('confirmar o pasar no reinicia el plazo común', () async {
+      nuevo(ronda: const Duration(milliseconds: 300));
+      final (ana, beto) = parejaJugando();
+      ana.tirar();
+      await esperar(200);
+      ana.pasarRonda(); // si reiniciara, vencería a los 500 ms
+      expect(ana.estado.ronda!.id, 1);
+      await esperar(180); // 380 ms: ya venció el plazo original
+      expect(ana.estado.ronda!.id, 2);
+      expect(beto.estado.ronda!.fase, FaseRonda.esperandoTirada);
+    });
+
+    test('reconectar o caerse no alarga el plazo', () async {
+      nuevo(ronda: const Duration(milliseconds: 400));
+      final (ana, beto) = parejaJugando();
+      ana.tirar();
+      await esperar(200);
+      beto.caer();
+      beto.volver();
+      expect(ana.estado.ronda!.id, 1);
+      await esperar(320); // 520 ms desde la tirada
+      expect(ana.estado.ronda!.id, 2);
+    });
+
+    test('tres rondas seguidas sin respuesta provocan el abandono', () async {
+      nuevo(ronda: const Duration(milliseconds: 60));
+      final (ana, beto) = parejaJugando();
+      for (var i = 0; i < 3; i++) {
+        expect(ana.estado.jugador(beto.id)!.estado, EstadoJugador.jugando);
+        ana.tirar();
+        ana.pasarRonda();
+        await esperar(130);
+      }
+      final e = ana.estado;
+      expect(e.jugador(beto.id)!.estado, EstadoJugador.abandono);
+      expect(e.fase, FaseSala.terminada);
+      expect(e.resultado!.ganadores, [ana.id]);
+    });
+
+    test('pasar voluntariamente nunca cuenta como inactividad', () async {
+      nuevo(ronda: const Duration(milliseconds: 60));
+      final (ana, beto) = parejaJugando();
+      // Beto pasa siempre: nunca debe acumular faltas de respuesta.
+      for (var i = 0; i < 5; i++) {
+        ana.tirar();
+        ana.pasarRonda();
+        beto.pasarRonda();
+      }
+      await esperar(200);
+      expect(ana.estado.jugador(beto.id)!.estado, EstadoJugador.jugando);
+      expect(ana.estado.ronda!.id, 6);
+    });
+
+    test('responder reinicia la cuenta de rondas sin respuesta', () async {
+      nuevo(ronda: const Duration(milliseconds: 60));
+      final (ana, beto) = parejaJugando();
+      Future<void> ronda({required bool betoResponde}) async {
+        ana.tirar();
+        ana.pasarRonda();
+        if (betoResponde) {
+          beto.pasarRonda();
+        } else {
+          await esperar(130);
+        }
+      }
+
+      await ronda(betoResponde: false); // 1
+      await ronda(betoResponde: false); // 2
+      await ronda(betoResponde: true); // reinicia
+      await ronda(betoResponde: false); // 1
+      await ronda(betoResponde: false); // 2
+      expect(ana.estado.jugador(beto.id)!.estado, EstadoJugador.jugando);
+      expect(ana.estado.fase, FaseSala.jugando);
+    });
+
+    test(
+      'vence la ronda con alguien desconectado: sin respuesta, no abandono',
+      () async {
+        nuevo(ronda: const Duration(milliseconds: 100)); // la gracia es larga
+        final (ana, beto) = parejaJugando();
+        ana.tirar();
+        ana.pasarRonda();
+        beto.caer();
+        await esperar(220);
+        final e = ana.estado;
+        expect(e.ronda!.id, 2);
+        final b = e.jugador(beto.id)!;
+        expect(b.estado, EstadoJugador.jugando);
+        expect(b.conectado, isFalse);
+        expect(b.graciaRestante, greaterThan(0));
+        // Puede volver y seguir participando.
+        beto.volver();
+        expect(beto.estado.miJugador!.participa, isTrue);
+        expect(beto.estado.ronda!.id, 2);
+      },
+    );
+
+    test(
+      'vence la gracia con la ronda abierta: abandono y la ronda se cierra',
+      () async {
+        nuevo(graciaPartida: const Duration(milliseconds: 80));
+        final (ana, beto, codigo) = parejaEnLobby();
+        final caro = Jugador(g, 'caro')..unirse(codigo);
+        ana.accion(MsgCliente.empezar);
+        for (final j in [ana, beto, caro]) {
+          j.distribuir();
+        }
+        ana.tirar();
+        ana.pasarRonda();
+        beto.pasarRonda();
+        expect(ana.estado.ronda!.id, 1, reason: 'falta Caro');
+        caro.caer();
+        await esperar(200);
+        final e = ana.estado;
+        expect(e.jugador(caro.id)!.estado, EstadoJugador.abandono);
+        expect(e.ronda!.id, 2, reason: 'ya no se espera a Caro');
+        expect(e.ronda!.fase, FaseRonda.esperandoTirada);
+        expect(e.fase, FaseSala.jugando);
+      },
+    );
+
+    test(
+      'rendido, abandonado y terminado no pueden lanzar ni bloquean rondas',
+      () {
+        final (ana, beto, codigo) = parejaEnLobby();
+        final caro = Jugador(g, 'caro')..unirse(codigo);
+        ana.accion(MsgCliente.empezar);
+        for (final j in [ana, beto, caro]) {
+          j.distribuir();
+        }
+        caro.accion(MsgCliente.conceder);
+        caro.tirar(de: 1);
+        expect(caro.canal.ultimoError, isNotNull);
+        ana.tirar();
+        expect(ana.estado.ronda!.resoluciones.keys.toSet(), {ana.id, beto.id});
+        ana.pasarRonda();
+        beto.pasarRonda();
+        expect(ana.estado.ronda!.id, 2, reason: 'el rendido no bloquea');
+      },
+    );
+
+    test('el plazo se reprograma en cada ronda', () async {
+      nuevo(ronda: const Duration(milliseconds: 150));
+      final (ana, beto) = parejaJugando();
+      jugarRonda([ana, beto]); // ronda 1 cerrada sin esperar al plazo
+      expect(ana.estado.ronda!.id, 2);
+      ana.tirar();
+      expect(ana.estado.ronda!.segundos, isNotNull);
+      await esperar(260);
+      expect(ana.estado.ronda!.id, 3);
     });
   });
 }

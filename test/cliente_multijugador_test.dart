@@ -144,11 +144,7 @@ void main() {
     test('si se cae, reconecta solo y recupera la sala', () async {
       final canal = await conectado();
       canal.servidorEstado(
-        estadoSala(
-          fase: FaseSala.jugando,
-          turnoDe: 'b',
-          mensaje: 'Antes del corte',
-        ),
+        estadoSala(fase: FaseSala.jugando, mensaje: 'Antes del corte'),
       );
       await esperar(5);
 
@@ -165,15 +161,14 @@ void main() {
       servidor.ultima.servidorEstado(
         estadoSala(
           fase: FaseSala.jugando,
-          turnoDe: 'a',
-          turno: 4,
+          ronda: 4,
           mensaje: 'Después del corte',
         ),
       );
       await esperar(5);
       expect(cliente.conexion, EstadoConexion.conectado);
       expect(cliente.intento, 0);
-      expect(cliente.sala!.turno, 4);
+      expect(cliente.sala!.ronda!.id, 4);
     });
 
     test('reintenta varias veces si el servidor sigue sin responder', () async {
@@ -255,7 +250,7 @@ void main() {
 
     test('al caerse se libera una acción que esperaba respuesta', () async {
       final canal = await conectado();
-      expect(cliente.tirar(), isTrue);
+      expect(cliente.tirar(1), isTrue);
       expect(cliente.esperando, isTrue);
       canal.servidorCierra();
       await esperar(5);
@@ -266,7 +261,7 @@ void main() {
   group('Segundo plano', () {
     Future<CanalWsFalso> enPartida() async {
       final canal = await conectado();
-      canal.servidorEstado(estadoSala(fase: FaseSala.jugando, turnoDe: 'a'));
+      canal.servidorEstado(estadoSala(fase: FaseSala.jugando));
       await esperar(5);
       return canal;
     }
@@ -289,11 +284,11 @@ void main() {
         expect(servidor.ultima.enviados.first['tipo'], MsgCliente.auth);
 
         servidor.ultima.servidorEstado(
-          estadoSala(fase: FaseSala.jugando, turnoDe: 'b', turno: 7),
+          estadoSala(fase: FaseSala.jugando, ronda: 7),
         );
         await esperar(5);
         expect(cliente.conexion, EstadoConexion.conectado);
-        expect(cliente.sala!.turno, 7);
+        expect(cliente.sala!.ronda!.id, 7);
       },
     );
 
@@ -355,7 +350,7 @@ void main() {
         final antes = cliente.desdeUltimoEstado;
         await esperar(40);
         expect(cliente.desdeUltimoEstado, greaterThan(antes));
-        canal.servidorEstado(estadoSala(fase: FaseSala.jugando, turnoDe: 'a'));
+        canal.servidorEstado(estadoSala(fase: FaseSala.jugando));
         await esperar(5);
         expect(
           cliente.desdeUltimoEstado,
@@ -441,20 +436,35 @@ void main() {
       await esperar(5);
       servidor.ultima.servidorEnvia({'tipo': MsgServidor.sinSala});
       await esperar(5);
-      cliente.tirar();
+      cliente.tirar(1);
       expect(cliente.esperando, isTrue);
       await esperar(80);
       expect(cliente.esperando, isFalse);
     });
 
-    test('colocar manda casilla y dado ancla', () async {
+    test('las acciones de ronda llevan el id de ronda', () async {
       final canal = await conectado();
-      cliente.colocar(17, 1);
+      cliente.tirar(3);
+      expect(canal.enviados.last, {'tipo': MsgCliente.tirar, 'ronda': 3});
+      canal.servidorEstado(estadoSala());
+      await esperar(5);
+      cliente.confirmarJugada(3, 17, 1);
       expect(canal.enviados.last, {
-        'tipo': MsgCliente.colocar,
+        'tipo': MsgCliente.confirmarJugada,
+        'ronda': 3,
         'indice': 17,
         'ancla': 1,
       });
+      canal.servidorEstado(estadoSala());
+      await esperar(5);
+      cliente.pasarRonda(3);
+      expect(canal.enviados.last, {'tipo': MsgCliente.pasarRonda, 'ronda': 3});
+    });
+
+    test('nunca se envían dados: solo la petición de tirar', () async {
+      final canal = await conectado();
+      cliente.tirar(1);
+      expect(canal.enviados.last.keys.toSet(), {'tipo', 'ronda'});
     });
 
     test('perder la sala sin pedirlo (servidor reiniciado) avisa', () async {

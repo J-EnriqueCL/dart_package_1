@@ -5,10 +5,9 @@ import 'package:servidor_brilliant/servidor_brilliant.dart';
 
 /// Azar con valores predefinidos: cada `nextInt(max)` devuelve el siguiente.
 ///
-/// Orden de consumo en una partida: 1 valor para elegir qué jugador empieza,
-/// justo cuando todos confirman su distribución inicial (los números iniciales
-/// los eligen los jugadores, no el azar), y luego 2 por cada tirada
-/// (0..5 = dado 1..6).
+/// Orden de consumo en una partida: nada al empezar (los números iniciales
+/// los eligen los jugadores y no se sortea quién abre) y 2 valores por cada
+/// tirada de ronda (0..5 = dado 1..6).
 class GuionAzar implements Random {
   GuionAzar(this.valores);
   final List<int> valores;
@@ -28,8 +27,8 @@ class GuionAzar implements Random {
   double nextDouble() => 0;
 }
 
-/// Prefijo del guion con el que empieza el jugador 0.
-const guionInicio = [0];
+/// Prefijo del guion al empezar la partida (ya no se sortea quién abre).
+const guionInicio = <int>[];
 
 /// Pone [orden] (por defecto 1..6) en las seis posiciones iniciales del mapa
 /// de [p] para el jugador [id], sin confirmar.

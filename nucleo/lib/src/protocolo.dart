@@ -1,6 +1,7 @@
 import 'dart_package_1_base.dart';
 import 'mapas.dart';
 import 'preparacion.dart';
+import 'premios.dart';
 
 /// Nombres de los mensajes del protocolo WebSocket (`/ws`).
 ///
@@ -26,6 +27,9 @@ abstract final class MsgCliente {
 
   /// En el lobby sale de la sala; en partida equivale a rendirse y salir.
   static const salirSala = 'salir_sala';
+
+  /// `{ronda}`: lanza los dados compartidos de la ronda (solo con la ronda en
+  /// `esperandoTirada`; la primera solicitud válida genera la única tirada).
   static const tirar = 'tirar';
 
   /// `{indice, numero}`: pone un número del 1 al 6 en una de las seis
@@ -39,9 +43,12 @@ abstract final class MsgCliente {
   /// Confirma la distribución inicial; después ya no se puede cambiar.
   static const confirmarDistribucion = 'confirmar_distribucion';
 
-  /// `{indice, ancla}`: `ancla` es la posición (0 o 1) del dado ancla.
-  static const colocar = 'colocar';
-  static const pasar = 'pasar';
+  /// `{ronda, indice, ancla}`: confirma la jugada de la ronda en tu propio
+  /// tablero. `ancla` es la posición (0 o 1) del dado ancla.
+  static const confirmarJugada = 'confirmar_jugada';
+
+  /// `{ronda}`: no colocas nada en esta ronda (se puede aunque haya jugadas).
+  static const pasarRonda = 'pasar_ronda';
   static const conceder = 'conceder';
 
   /// Solo con la partida terminada: la sala vuelve al lobby.
@@ -90,6 +97,89 @@ enum FaseSala {
 
 /// Situación de un jugador en la partida. La conexión temporal es aparte
 /// ([JugadorSala.conectado]): perder la red no cambia este estado.
+/// Fase de una ronda.
+enum FaseRonda {
+  /// Nadie ha tirado: cualquier jugador que siga jugando puede hacerlo.
+  esperandoTirada,
+
+  /// Hay dados compartidos y los participantes resuelven a la vez.
+  resolviendo;
+
+  static FaseRonda desde(Object? v) => FaseRonda.values.firstWhere(
+    (f) => f.name == v,
+    orElse: () => throw FormatException('Fase de ronda inválida: $v'),
+  );
+}
+
+/// Cómo ha resuelto un jugador la ronda abierta. Quien no responde en plazo no
+/// aparece aquí: se anota en el mensaje y la ronda se cierra.
+enum Resolucion {
+  pendiente,
+  confirmo,
+  paso;
+
+  static Resolucion desde(Object? v) => Resolucion.values.firstWhere(
+    (f) => f.name == v,
+    orElse: () => throw FormatException('Resolución inválida: $v'),
+  );
+}
+
+class RondaSala {
+  const RondaSala({
+    required this.id,
+    required this.fase,
+    this.dados,
+    this.resoluciones = const {},
+    this.segundos,
+  });
+
+  /// Identificador de la ronda. Sube al cerrarse; las acciones lo incluyen.
+  final int id;
+  final FaseRonda fase;
+
+  /// Los dos dados compartidos, o null en `esperandoTirada`.
+  final List<int>? dados;
+
+  /// Participantes que deben resolver la ronda y cómo van. Vacío si no hay
+  /// ronda abierta.
+  final Map<String, Resolucion> resoluciones;
+
+  /// Segundos que quedan del plazo común cuando se tomó la foto.
+  final int? segundos;
+
+  bool get abierta => fase == FaseRonda.resolviendo;
+
+  List<String> get pendientes => [
+    for (final e in resoluciones.entries)
+      if (e.value == Resolucion.pendiente) e.key,
+  ];
+
+  Map<String, Object?> toJson() => {
+    'id': id,
+    'fase': fase.name,
+    'dados': dados,
+    'resoluciones': {for (final e in resoluciones.entries) e.key: e.value.name},
+    'segundos': segundos,
+  };
+
+  factory RondaSala.fromJson(Map<String, Object?> j) {
+    final dados = (j['dados'] as List?)?.cast<int>();
+    if (dados != null && dados.length != 2) {
+      throw const FormatException('Deben ser dos dados.');
+    }
+    return RondaSala(
+      id: j['id'] as int,
+      fase: FaseRonda.desde(j['fase']),
+      dados: dados,
+      resoluciones: {
+        for (final e in (j['resoluciones'] as Map).entries)
+          e.key as String: Resolucion.desde(e.value),
+      },
+      segundos: j['segundos'] as int?,
+    );
+  }
+}
+
 enum EstadoJugador {
   /// Preparación: todavía coloca sus números iniciales.
   preparando,
@@ -117,6 +207,10 @@ enum EstadoJugador {
 }
 
 enum MotivoFin {
+  /// Al cerrar una ronda (y liquidar sus premios), algún jugador elegible
+  /// alcanzó o superó la meta: gana el de más puntos.
+  meta,
+
   /// Todos los jugadores que no se rindieron ni abandonaron terminaron su
   /// tablero: gana quien tenga más puntos.
   todosTerminaron,
@@ -204,12 +298,13 @@ class EstadoSala {
     required this.maxJugadores,
     required this.anfitrion,
     required this.jugadores,
-    this.turnoDe,
-    this.turno = 1,
-    this.dados,
+    this.ronda,
+    this.meta,
+    this.reclamaciones = const [],
+    this.misPendientes = const [],
+    this.liquidacion = const [],
     this.tablero = const [],
     this.mensaje = '',
-    this.segundosTurno,
     this.resultado,
   });
 
@@ -223,12 +318,21 @@ class EstadoSala {
   final String anfitrion;
   final List<JugadorSala> jugadores;
 
-  /// Quién debe jugar; null fuera de la partida.
-  final String? turnoDe;
-  final int turno;
+  /// Ronda en curso; null fuera de la partida (lobby, preparación, final).
+  final RondaSala? ronda;
 
-  /// Dados tirados en el turno actual, o null si aún no se tiraron.
-  final List<int>? dados;
+  /// Meta de puntos, fijada al empezar según los jugadores; null antes.
+  final int? meta;
+
+  /// Premios por grupo: quién ocupa cada nivel (solo lo ya liquidado).
+  final List<ReclamacionGrupo> reclamaciones;
+
+  /// Mis grupos completados en la ronda abierta, todavía sin liquidar: su
+  /// premio se decide al cerrar la ronda y no cuenta como definitivo.
+  final List<String> misPendientes;
+
+  /// Última liquidación (al cerrar la ronda indicada en cada elemento).
+  final List<Adjudicacion> liquidacion;
 
   /// Tablero **propio** de quien recibe el estado: valor de cada una de las 49
   /// casillas (null = vacía). Vacío en el lobby. Los tableros rivales no se
@@ -238,12 +342,35 @@ class EstadoSala {
   /// Texto con lo último que pasó (para mostrar a todos).
   final String mensaje;
 
-  /// Segundos que le quedan a [turnoDe] cuando se tomó la foto.
-  final int? segundosTurno;
   final ResultadoPartida? resultado;
 
   bool get soyAnfitrion => anfitrion == yo;
-  bool get esMiTurno => fase == FaseSala.jugando && turnoDe == yo;
+
+  /// Reclamación pública de un grupo, o una vacía si nadie lo ha liquidado.
+  ReclamacionGrupo reclamacionDe(String grupo) {
+    for (final r in reclamaciones) {
+      if (r.grupo == grupo) return r;
+    }
+    return ReclamacionGrupo(grupo: grupo);
+  }
+
+  /// Dados compartidos de la ronda abierta, o null si aún no se tiraron.
+  List<int>? get dados => ronda?.dados;
+
+  /// Mi resolución en la ronda abierta; null si no participo en ella.
+  Resolucion? get miResolucion => ronda?.resoluciones[yo];
+
+  /// Estoy en la ronda abierta y aún no confirmé ni pasé.
+  bool get estoyPendiente =>
+      fase == FaseSala.jugando &&
+      (ronda?.abierta ?? false) &&
+      miResolucion == Resolucion.pendiente;
+
+  /// Puedo pulsar "Tirar dados": ronda en espera y sigo jugando.
+  bool get puedoTirar =>
+      fase == FaseSala.jugando &&
+      ronda?.fase == FaseRonda.esperandoTirada &&
+      miJugador?.estado == EstadoJugador.jugando;
   MapaOficial get mapaOficial => mapasOficiales[mapa];
 
   JugadorSala? jugador(String id) {
@@ -281,12 +408,13 @@ class EstadoSala {
     'maxJugadores': maxJugadores,
     'anfitrion': anfitrion,
     'jugadores': [for (final j in jugadores) j.toJson()],
-    'turnoDe': turnoDe,
-    'turno': turno,
-    'dados': dados,
+    'ronda': ronda?.toJson(),
+    'meta': meta,
+    'reclamaciones': [for (final r in reclamaciones) r.toJson()],
+    'misPendientes': misPendientes,
+    'liquidacion': [for (final a in liquidacion) a.toJson()],
     'tablero': tablero,
     'mensaje': mensaje,
-    'segundosTurno': segundosTurno,
     'resultado': resultado?.toJson(),
   };
 
@@ -301,10 +429,7 @@ class EstadoSala {
       if (tablero.isNotEmpty && tablero.length != 49) {
         throw const FormatException('El tablero debe tener 49 casillas.');
       }
-      final dados = (j['dados'] as List?)?.cast<int>();
-      if (dados != null && dados.length != 2) {
-        throw const FormatException('Deben ser dos dados.');
-      }
+      final ronda = j['ronda'];
       final res = j['resultado'];
       return EstadoSala(
         yo: j['yo'] as String,
@@ -317,12 +442,21 @@ class EstadoSala {
           for (final e in j['jugadores'] as List)
             JugadorSala.fromJson((e as Map).cast<String, Object?>()),
         ],
-        turnoDe: j['turnoDe'] as String?,
-        turno: j['turno'] as int,
-        dados: dados,
+        ronda: ronda == null
+            ? null
+            : RondaSala.fromJson((ronda as Map).cast<String, Object?>()),
+        meta: j['meta'] as int?,
+        reclamaciones: [
+          for (final r in (j['reclamaciones'] as List? ?? const []))
+            ReclamacionGrupo.fromJson((r as Map).cast<String, Object?>()),
+        ],
+        misPendientes: (j['misPendientes'] as List? ?? const []).cast<String>(),
+        liquidacion: [
+          for (final a in (j['liquidacion'] as List? ?? const []))
+            Adjudicacion.fromJson((a as Map).cast<String, Object?>()),
+        ],
         tablero: tablero,
         mensaje: j['mensaje'] as String,
-        segundosTurno: j['segundosTurno'] as int?,
         resultado: res == null
             ? null
             : ResultadoPartida.fromJson((res as Map).cast<String, Object?>()),

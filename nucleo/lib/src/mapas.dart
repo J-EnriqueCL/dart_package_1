@@ -1,4 +1,5 @@
 import 'dart_package_1_base.dart';
+import 'premios.dart';
 
 /// Un mapa oficial: disposición de colores 7x7 y casillas iniciales.
 ///
@@ -10,6 +11,7 @@ class MapaOficial {
     required this.plano,
     required this.indicesIniciales,
     this.gruposConectados = const [],
+    this.gruposPremio = const [],
   });
 
   final String nombre;
@@ -21,6 +23,20 @@ class MapaOficial {
   /// Casillas no contiguas que forman una misma área (p. ej. las esquinas
   /// amarillas del nivel 1).
   final List<Set<int>> gruposConectados;
+
+  /// Unidades de puntuación competitiva del multijugador (premios por orden de
+  /// completar). Vacío = el mapa todavía no tiene su tabla validada y no está
+  /// disponible en línea (sigue disponible en el modo individual).
+  final List<GrupoPremio> gruposPremio;
+
+  /// ¿Se puede jugar este mapa en el multijugador?
+  bool get disponibleEnLinea => gruposPremio.isNotEmpty;
+
+  /// Nombre legible de un grupo, p. ej. "Azul (casilla 2)".
+  String etiquetaDe(GrupoPremio g) {
+    final region = crearTablero()[g.casillas.first].region.nombre;
+    return '$region (casilla ${g.casillas.reduce((a, b) => a < b ? a : b)})';
+  }
 
   List<Celda> crearTablero() {
     final celdas = <Celda>[];
@@ -76,6 +92,48 @@ const mapasOficiales = <MapaOficial>[
     indicesIniciales: [2, 12, 22, 25, 37, 46],
     gruposConectados: [
       {0, 6, 24, 42, 48},
+    ],
+    // Provisional (primera prueba en teléfonos): agrupación y premios leídos
+    // de la imagen del tablero; cada grupo es independiente aunque comparta
+    // color con otro.
+    gruposPremio: [
+      GrupoPremio(
+        id: 'N1-a0',
+        casillas: [0, 6, 24, 42, 48],
+        premios: [8, 6, 4],
+      ),
+      GrupoPremio(
+        id: 'N1-a1',
+        casillas: [1, 7, 8, 14, 21, 28],
+        premios: [4, 3, 2],
+      ),
+      GrupoPremio(id: 'N1-a2', casillas: [2, 9, 10, 17], premios: [7, 5, 3]),
+      GrupoPremio(
+        id: 'N1-a3',
+        casillas: [3, 4, 5, 11, 12, 18],
+        premios: [6, 4, 2],
+      ),
+      GrupoPremio(
+        id: 'N1-a13',
+        casillas: [13, 19, 20, 25, 26, 27],
+        premios: [4, 3, 2],
+      ),
+      GrupoPremio(
+        id: 'N1-a15',
+        casillas: [15, 16, 22, 29, 35, 36],
+        premios: [6, 4, 2],
+      ),
+      GrupoPremio(
+        id: 'N1-a23',
+        casillas: [23, 30, 31, 37, 43, 44],
+        premios: [6, 4, 2],
+      ),
+      GrupoPremio(
+        id: 'N1-a32',
+        casillas: [32, 33, 38, 39, 45, 46],
+        premios: [6, 4, 2],
+      ),
+      GrupoPremio(id: 'N1-a34', casillas: [34, 40, 41, 47], premios: [7, 5, 3]),
     ],
   ),
   MapaOficial(

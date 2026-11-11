@@ -2,9 +2,20 @@
 # Created by `dart pub`
 .dart_tool/
 
-# Avoid committing pubspec.lock for library packages; see
-# https://dart.dev/tools/pub/private-files#pubspec-lock.
-pubspec.lock
+# pubspec.lock: se versiona en las aplicaciones (app y servidor) para que otra
+# máquina resuelva las mismas versiones; no en el paquete compartido (nucleo).
+nucleo/pubspec.lock
 
 # Salida de compilación (se regenera con flutter build / flutter test).
 build/
+*.apk
+*.aab
+
+# Configuración personal del IDE y de herramientas locales.
+.idea/
+*.iml
+.claude/
+
+# Secretos locales (las claves de firma de Android ya se ignoran en android/).
+.env
+.env.*

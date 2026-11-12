@@ -1,5 +1,6 @@
 import 'dart:convert';
 
+import 'package:brilliant_nucleo/brilliant_nucleo.dart';
 import 'package:shelf/shelf.dart';
 import 'package:shelf_cors_headers/shelf_cors_headers.dart';
 import 'package:shelf_router/shelf_router.dart';
@@ -36,6 +37,16 @@ Handler crearApi(
   GestorSalas? gestor,
 }) {
   final r = Router();
+
+  // Público y sin sesión: la app lo usa en "Probar conexión" para saber que
+  // responde un servidor Brilliant compatible. No revela nada sensible.
+  r.get('/salud', (Request req) {
+    return _resp(200, {
+      'servicio': servicioBrilliant,
+      'protocolo': versionProtocolo,
+      'ok': true,
+    });
+  });
 
   r.post('/registro', (Request req) async {
     final d = await _leer(req);

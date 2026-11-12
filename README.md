@@ -105,9 +105,15 @@ debe devolver un error JSON por falta de sesión.
 
 ## Ejecutar la app
 
-La app necesita saber dónde está el servidor. Se indica al compilar o ejecutar con
-`--dart-define=URL_SERVIDOR=...` (si no se indica, usa `http://localhost:8080`, que **no** sirve en un teléfono).
-La app deduce el WebSocket de esa URL (`http` → `ws`, `https` → `wss`).
+La app necesita saber dónde está el servidor. Hay dos formas, que se combinan:
+
+1. **Desde la propia app, sin recompilar** (recomendado para cambiar de IP): en la pantalla de inicio de sesión se ve
+   «Servidor: …» y el botón **Configurar servidor** (también está en el menú de la cuenta). Ahí se escribe la dirección,
+   se pulsa **Probar conexión** y **Guardar**. Ver «Configurar el servidor desde la app» más abajo.
+2. **Al compilar o ejecutar**, con `--dart-define=URL_SERVIDOR=...`. Es el valor inicial.
+
+Prioridad: **dirección guardada en la app (si es válida) > `--dart-define=URL_SERVIDOR` > `http://localhost:8080`**
+(que **no** sirve en un teléfono). La app deduce el WebSocket de esa dirección (`http` → `ws`, `https` → `wss`).
 
 ```powershell
 # Navegador, con el servidor en el mismo equipo
@@ -125,8 +131,10 @@ flutter run --dart-define=URL_SERVIDOR=http://localhost:8080
 
 ## Generar el APK para probar por Wi-Fi
 
-La IP de `URL_SERVIDOR` queda **incrustada en el APK**: si cambia la IP del equipo que ejecuta el servidor, hay que
-generar un APK nuevo. No hay una IP válida para todos: usa la tuya (`ipconfig`).
+El `--dart-define=URL_SERVIDOR` queda incrustado en el APK como **valor inicial**. Si después cambia la IP del equipo
+que ejecuta el servidor, **ya no hace falta generar un APK nuevo**: se cambia desde la app (ver abajo). No hay una IP
+válida para todos: usa la tuya (`ipconfig`). El `--dart-define` sigue funcionando igual que antes; se puede omitir y
+configurar el servidor desde la app.
 
 ```powershell
 flutter build apk --debug --dart-define=URL_SERVIDOR=http://IP-DEL-SERVIDOR:8080
@@ -136,6 +144,29 @@ El archivo queda en `build\app\outputs\flutter-apk\app-debug.apk` (unos 160 MB).
 WhatsApp, correo…), ábrelo y permite «instalar apps desconocidas» si Android lo pide. Se actualiza encima de la versión
 anterior. Los builds **debug** permiten tráfico `http`/`ws` sin cifrar solo para desarrollo; un build release no (usa
 `https`/`wss` detrás de un proxy con TLS).
+
+### Configurar el servidor desde la app
+
+- **Dónde:** pantalla de inicio de sesión → «Configurar servidor» (o menú de la cuenta → «Configurar servidor» con
+  sesión iniciada). Se muestra la dirección actual, un campo para la nueva, **Probar conexión**, **Guardar** y
+  **Cancelar**.
+- **Formato:** `http://IP:puerto` o `https://dominio` (puerto y prefijo de ruta opcionales). Se quitan los espacios
+  exteriores y la barra final. No se aceptan usuario/contraseña en la dirección, `?parámetros` ni `#fragmento`.
+- **Probar conexión:** consulta `GET /salud` del servidor (público, no pide sesión, con un tiempo máximo de 6 s) y exige
+  que responda un **servidor Brilliant con un protocolo compatible**; que haya un puerto abierto no basta. Distingue
+  éxito, tiempo agotado, sin conexión y respuesta incompatible. Probar no cambia nada.
+- **Guardar:** se guarda **solo la dirección** (con `shared_preferences`, nunca contraseñas ni tokens) y se usa en los
+  siguientes arranques. Con la sesión iniciada pide confirmación, porque **cambiar de servidor cierra la sesión**: se
+  descarta el token del servidor anterior, se cierran sus conexiones y no se reconecta a él. **Cancelar** no cambia
+  nada. No hay forma de cambiar de servidor a mitad de una partida: las pantallas de partida no ofrecen el botón, y si
+  el servidor cambiara con una abierta, su conexión se cierra y se vuelve al inicio.
+- **Dos servidores:** puedes alternar entre dos (p. ej. la PC y la laptop) cambiando la dirección y volviendo a iniciar
+  sesión. Las cuentas y las salas son de cada servidor.
+- **Seguridad:** `http://` se permite para pruebas en tu red local; **en producción usa `https://` (`wss://`)**. Una
+  página web servida por `https://` no puede llamar a un servidor `http://` (el navegador lo bloquea). No se ha tocado la
+  configuración de seguridad de Android ni de iOS: las conexiones de la app usan los sockets de Dart (no se ven
+  afectadas por la política de tráfico en claro del sistema), y los builds debug ya traen la configuración de red para
+  desarrollo. No se ha verificado en un teléfono con un build release hablando por `http://`.
 
 ### Dos escenarios
 

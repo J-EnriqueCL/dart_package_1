@@ -5,6 +5,7 @@ import 'dart:ui' show AppLifecycleState;
 import 'package:flutter/foundation.dart';
 import 'package:web_socket_channel/web_socket_channel.dart';
 
+import '../auth/config_servidor.dart' show urlWebSocketDe;
 import '../dart_package_1.dart';
 
 typedef FabricaCanal = WebSocketChannel Function(Uri url);
@@ -21,13 +22,9 @@ enum EstadoConexion {
   reconectando,
 }
 
-/// Dirección del WebSocket a partir de la del servidor HTTP.
-Uri urlWebSocket(Uri base) => Uri(
-  scheme: base.scheme == 'https' ? 'wss' : 'ws',
-  host: base.host,
-  port: base.hasPort ? base.port : null,
-  path: '/ws',
-);
+/// Dirección del WebSocket a partir de la del servidor HTTP (`http` → `ws`,
+/// `https` → `wss`), conservando el prefijo de ruta y añadiendo `/ws`.
+Uri urlWebSocket(Uri base) => urlWebSocketDe(base);
 
 /// Conexión con el servidor para jugar en línea.
 ///

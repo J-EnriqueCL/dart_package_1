@@ -1527,6 +1527,26 @@ void main() {
   });
 
   group('Conexión', () {
+    prueba('cambiar de servidor cierra el socket anterior y no reconecta', (
+      tester,
+    ) async {
+      await abrirCon(tester, estadoSala());
+      final conexion = servidor.ultima;
+      final total = servidor.conexiones.length;
+      expect(find.byType(PantallaMultijugador), findsOneWidget);
+
+      await auth.cambiarServidor(Uri.parse('http://otro.test:9000'));
+      await bombear(tester, 1000);
+      await transicion(tester);
+
+      expect(conexion.cerradoPorCliente, isTrue);
+      expect(find.byType(PantallaMultijugador), findsNothing);
+      // Pasa un buen rato: ninguna reconexión al servidor anterior.
+      await bombear(tester, 500);
+      expect(servidor.conexiones.length, total);
+      expect(auth.token, isNull);
+    });
+
     prueba('al cortarse muestra la banda, conserva la partida y se recupera', (
       tester,
     ) async {

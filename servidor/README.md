@@ -25,8 +25,14 @@ servidor valida cada jugada con las reglas reales.
 | ----------------- | ---------------------------- | ---------------------------- |
 | `POST /registro`  | `{correo, contrasena}`       | 201 `{id, correo}`           |
 | `POST /login`     | `{correo, contrasena}`       | 200 `{token}` (JWT, 1 hora)  |
+| `GET /salud`      | — (público, sin sesión)      | 200 `{servicio: "brilliant", protocolo, ok: true}` |
 | `GET /yo`         | — (`Authorization: Bearer`)  | 200 `{id, correo}`           |
 | `DELETE /cuenta`  | `{contrasena}` + Bearer      | 200 `{ok: true}`             |
+
+`GET /salud` lo usa la app en «Probar conexión» para comprobar que responde un servidor Brilliant con un `protocolo`
+compatible (`versionProtocolo` en `nucleo/`). Es público y no devuelve ningún dato de cuentas, configuración ni
+versión de software. Las rutas del servidor no llevan prefijo; si se publica detrás de un proxy que añade uno
+(`https://dominio/brilliant`), la app lo conserva en las peticiones HTTP y en `/ws`, y el proxy debe quitarlo.
 
 ## Partidas en línea (`GET /ws`, WebSocket)
 

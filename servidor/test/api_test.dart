@@ -179,4 +179,26 @@ void main() {
     );
     expect(r.statusCode, 400);
   });
+  group('Salud', () {
+    test('GET /salud es público y anuncia un servidor Brilliant compatible', () async {
+      final r = await llamar('GET', '/salud');
+      expect(r.statusCode, 200);
+      final d = await json(r);
+      expect(d, {'servicio': 'brilliant', 'protocolo': 1, 'ok': true});
+    });
+
+    test('no pide sesión y no filtra información sensible', () async {
+      await registrarYEntrar('x@y.com');
+      final r = await llamar('GET', '/salud', token: 'token-invalido');
+      expect(r.statusCode, 200);
+      final texto = jsonEncode(await json(r)).toLowerCase();
+      for (final prohibido in ['x@y.com', 'token', 'secreto', 'usuario', 'hash']) {
+        expect(texto, isNot(contains(prohibido)));
+      }
+    });
+
+    test('solo acepta GET', () async {
+      expect((await llamar('POST', '/salud')).statusCode, anyOf(404, 405));
+    });
+  });
 }

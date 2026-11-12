@@ -31,12 +31,15 @@ class _PantallaMultijugadorState extends State<PantallaMultijugador>
     with WidgetsBindingObserver {
   late final ClienteMultijugador _cliente;
   late final bool _propio;
+  late final Uri _servidorAlAbrir;
   StreamSubscription<String>? _avisos;
 
   @override
   void initState() {
     super.initState();
     _propio = widget.cliente == null;
+    _servidorAlAbrir = widget.auth.urlBase;
+    widget.auth.addListener(_alCambiarAuth);
     _cliente =
         widget.cliente ??
         ClienteMultijugador(
@@ -53,8 +56,17 @@ class _PantallaMultijugadorState extends State<PantallaMultijugador>
     _cliente.cicloDeVida(state);
   }
 
+  /// Si se cambia de servidor con esta pantalla abierta, se cierra el socket
+  /// del servidor anterior (sin más reconexiones) y se vuelve al acceso.
+  void _alCambiarAuth() {
+    if (widget.auth.urlBase == _servidorAlAbrir) return;
+    _cliente.cerrar();
+    if (mounted) Navigator.of(context).popUntil((r) => r.isFirst);
+  }
+
   @override
   void dispose() {
+    widget.auth.removeListener(_alCambiarAuth);
     WidgetsBinding.instance.removeObserver(this);
     _avisos?.cancel();
     // Al irse avisa al servidor (en partida cuenta como rendición).

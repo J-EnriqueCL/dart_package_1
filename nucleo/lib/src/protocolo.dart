@@ -3,6 +3,14 @@ import 'mapas.dart';
 import 'preparacion.dart';
 import 'premios.dart';
 
+/// Identificador con el que un servidor Brilliant se anuncia en `GET /salud`.
+const servicioBrilliant = 'brilliant';
+
+/// Versión del protocolo cliente-servidor. Solo debe subir cuando un cambio
+/// haga incompatibles a una app y un servidor antiguos entre sí; la app la
+/// compara al "Probar conexión" para avisar de un servidor incompatible.
+const versionProtocolo = 1;
+
 /// Nombres de los mensajes del protocolo WebSocket (`/ws`).
 ///
 /// Cada mensaje es un JSON `{"tipo": ..., ...}`. El cliente habla con

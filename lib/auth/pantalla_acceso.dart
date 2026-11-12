@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 
 import '../tema.dart';
 import 'cliente_auth.dart';
+import 'dialogo_servidor.dart';
 
 /// Pantalla para iniciar sesión o crear una cuenta.
 class PantallaAcceso extends StatefulWidget {
@@ -37,6 +38,12 @@ class _PantallaAccesoState extends State<PantallaAcceso> {
       _error = null;
       _repetir.clear();
     });
+  }
+
+  Future<void> _configurarServidor() async {
+    final cambio = await mostrarDialogoServidor(context, widget.auth);
+    // Un error de acceso anterior era de otro servidor: ya no vale.
+    if (cambio && mounted) setState(() => _error = null);
   }
 
   Future<void> _enviar() async {
@@ -115,7 +122,28 @@ class _PantallaAccesoState extends State<PantallaAcceso> {
                         textAlign: TextAlign.center,
                         style: const TextStyle(color: Colors.white70),
                       ),
-                      const SizedBox(height: 24),
+                      const SizedBox(height: 12),
+                      Text(
+                        'Servidor: ${widget.auth.urlBase}',
+                        key: const Key('servidor_actual'),
+                        textAlign: TextAlign.center,
+                        maxLines: 2,
+                        overflow: TextOverflow.ellipsis,
+                        style: const TextStyle(
+                          color: Colors.white54,
+                          fontSize: 12,
+                        ),
+                      ),
+                      if (widget.auth.config != null)
+                        Align(
+                          child: TextButton.icon(
+                            key: const Key('boton_configurar_servidor'),
+                            onPressed: _ocupado ? null : _configurarServidor,
+                            icon: const Icon(Icons.dns_outlined, size: 18),
+                            label: const Text('Configurar servidor'),
+                          ),
+                        ),
+                      const SizedBox(height: 12),
                       TextFormField(
                         key: const Key('campo_correo'),
                         controller: _correo,

@@ -19,3 +19,7 @@ build/
 # Secretos locales (las claves de firma de Android ya se ignoran en android/).
 .env
 .env.*
+
+# Generados por Flutter al resolver plugins.
+.flutter-plugins
+.flutter-plugins-dependencies

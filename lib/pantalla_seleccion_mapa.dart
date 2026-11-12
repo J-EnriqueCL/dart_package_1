@@ -3,6 +3,7 @@ import 'dart:math';
 import 'package:flutter/material.dart';
 
 import 'auth/cliente_auth.dart';
+import 'auth/dialogo_servidor.dart';
 import 'auth/pantalla_acceso.dart';
 import 'dart_package_1.dart';
 import 'online/pantalla_multijugador.dart';
@@ -52,9 +53,11 @@ class PantallaSeleccionMapa extends StatelessWidget {
                   key: const Key('menu_cuenta'),
                   icon: const Icon(Icons.account_circle_outlined),
                   tooltip: auth.correo,
-                  onSelected: (v) => v == 'salir'
-                      ? auth.cerrarSesion()
-                      : _borrarCuenta(context, auth),
+                  onSelected: (v) => switch (v) {
+                    'salir' => auth.cerrarSesion(),
+                    'servidor' => mostrarDialogoServidor(context, auth),
+                    _ => _borrarCuenta(context, auth),
+                  },
                   itemBuilder: (_) => [
                     PopupMenuItem(
                       enabled: false,
@@ -65,6 +68,12 @@ class PantallaSeleccionMapa extends StatelessWidget {
                       value: 'salir',
                       child: Text('Cerrar sesión'),
                     ),
+                    if (auth.config != null)
+                      const PopupMenuItem(
+                        key: Key('menu_servidor'),
+                        value: 'servidor',
+                        child: Text('Configurar servidor'),
+                      ),
                     const PopupMenuItem(
                       key: Key('menu_borrar'),
                       value: 'borrar',
